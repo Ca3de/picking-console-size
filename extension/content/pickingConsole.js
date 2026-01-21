@@ -435,50 +435,93 @@
     }
   }
 
+  // Helper to create element with classes and text
+  function createElement(tag, className, textContent) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (textContent) el.textContent = textContent;
+    return el;
+  }
+
   // Create floating panel
   function createFloatingPanel() {
     log('Creating floating panel...');
 
     const panel = document.createElement('div');
     panel.id = 'pcs-panel';
-    panel.innerHTML = `
-      <div class="pcs-header">
-        <span class="pcs-title">Size Calculator</span>
-        <button class="pcs-minimize" title="Minimize">−</button>
-      </div>
-      <div class="pcs-content">
-        <div class="pcs-status">Initializing...</div>
-        <div class="pcs-stats">
-          <div class="pcs-stat">
-            <div class="pcs-stat-label">Warehouse</div>
-            <div class="pcs-stat-value">${CONFIG.warehouseId}</div>
-          </div>
-          <div class="pcs-stat">
-            <div class="pcs-stat-label">Batches</div>
-            <div class="pcs-stat-value" id="pcs-batches-count">0</div>
-          </div>
-          <div class="pcs-stat">
-            <div class="pcs-stat-label">State</div>
-            <div class="pcs-stat-value" id="pcs-current-state">—</div>
-          </div>
-          <div class="pcs-stat">
-            <div class="pcs-stat-label">Process</div>
-            <div class="pcs-stat-value" id="pcs-current-process">—</div>
-          </div>
-        </div>
-        <div class="pcs-auto-fetch">
-          <div class="pcs-countdown">
-            <span class="pcs-countdown-label">Next refresh:</span>
-            <span class="pcs-countdown-value" id="pcs-countdown">--:--</span>
-          </div>
-        </div>
-        <div class="pcs-actions">
-          <button id="pcs-fetch-now" class="pcs-btn pcs-btn-primary" title="Fetch all weights now">Refresh</button>
-          <button id="pcs-clear-cache" class="pcs-btn" title="Clear cached weights">Clear</button>
-        </div>
-      </div>
-    `;
 
+    // Header
+    const header = createElement('div', 'pcs-header');
+    header.appendChild(createElement('span', 'pcs-title', 'Size Calculator'));
+    const minimizeBtn = createElement('button', 'pcs-minimize', '−');
+    minimizeBtn.title = 'Minimize';
+    header.appendChild(minimizeBtn);
+    panel.appendChild(header);
+
+    // Content
+    const content = createElement('div', 'pcs-content');
+
+    // Status
+    content.appendChild(createElement('div', 'pcs-status', 'Initializing...'));
+
+    // Stats grid
+    const stats = createElement('div', 'pcs-stats');
+
+    // Warehouse stat
+    const warehouseStat = createElement('div', 'pcs-stat');
+    warehouseStat.appendChild(createElement('div', 'pcs-stat-label', 'Warehouse'));
+    warehouseStat.appendChild(createElement('div', 'pcs-stat-value', CONFIG.warehouseId));
+    stats.appendChild(warehouseStat);
+
+    // Batches stat
+    const batchesStat = createElement('div', 'pcs-stat');
+    batchesStat.appendChild(createElement('div', 'pcs-stat-label', 'Batches'));
+    const batchesValue = createElement('div', 'pcs-stat-value', '0');
+    batchesValue.id = 'pcs-batches-count';
+    batchesStat.appendChild(batchesValue);
+    stats.appendChild(batchesStat);
+
+    // State stat
+    const stateStat = createElement('div', 'pcs-stat');
+    stateStat.appendChild(createElement('div', 'pcs-stat-label', 'State'));
+    const stateValue = createElement('div', 'pcs-stat-value', '—');
+    stateValue.id = 'pcs-current-state';
+    stateStat.appendChild(stateValue);
+    stats.appendChild(stateStat);
+
+    // Process stat
+    const processStat = createElement('div', 'pcs-stat');
+    processStat.appendChild(createElement('div', 'pcs-stat-label', 'Process'));
+    const processValue = createElement('div', 'pcs-stat-value', '—');
+    processValue.id = 'pcs-current-process';
+    processStat.appendChild(processValue);
+    stats.appendChild(processStat);
+
+    content.appendChild(stats);
+
+    // Auto-fetch countdown
+    const autoFetch = createElement('div', 'pcs-auto-fetch');
+    const countdown = createElement('div', 'pcs-countdown');
+    countdown.appendChild(createElement('span', 'pcs-countdown-label', 'Next refresh:'));
+    const countdownValue = createElement('span', 'pcs-countdown-value', '--:--');
+    countdownValue.id = 'pcs-countdown';
+    countdown.appendChild(countdownValue);
+    autoFetch.appendChild(countdown);
+    content.appendChild(autoFetch);
+
+    // Action buttons
+    const actions = createElement('div', 'pcs-actions');
+    const fetchBtn = createElement('button', 'pcs-btn pcs-btn-primary', 'Refresh');
+    fetchBtn.id = 'pcs-fetch-now';
+    fetchBtn.title = 'Fetch all weights now';
+    actions.appendChild(fetchBtn);
+    const clearBtn = createElement('button', 'pcs-btn', 'Clear');
+    clearBtn.id = 'pcs-clear-cache';
+    clearBtn.title = 'Clear cached weights';
+    actions.appendChild(clearBtn);
+    content.appendChild(actions);
+
+    panel.appendChild(content);
     document.body.appendChild(panel);
 
     // Event listeners
@@ -630,42 +673,40 @@
     const container = document.getElementById('pcs-batch-items');
     if (!container) return;
 
-    container.innerHTML = '';
+    // Clear container safely
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
 
     batchIds.forEach(batchId => {
-      const item = document.createElement('div');
-      item.className = 'pcs-batch-item';
+      const item = createElement('div', 'pcs-batch-item');
       item.dataset.batchId = batchId;
 
       // Find API data for this batch
       const apiData = batchDataFromAPI.find(b => b.batchId === batchId);
       const result = batchResults.get(batchId);
 
+      // Always add batch ID span
+      item.appendChild(createElement('span', 'pcs-batch-id', batchId));
+
       if (result) {
         if (result.error) {
-          item.innerHTML = `
-            <span class="pcs-batch-id">${batchId}</span>
-            <span class="pcs-batch-error" title="${result.error}">Error</span>
-          `;
+          const errorSpan = createElement('span', 'pcs-batch-error', 'Error');
+          errorSpan.title = result.error;
+          item.appendChild(errorSpan);
         } else {
-          item.innerHTML = `
-            <span class="pcs-batch-id">${batchId}</span>
-            <span class="pcs-batch-weight">${result.averageWeight} lbs avg</span>
-            <span class="pcs-batch-details">(${result.totalItems} items, ${result.totalWeight} lbs total)</span>
-          `;
+          item.appendChild(createElement('span', 'pcs-batch-weight', `${result.averageWeight} lbs avg`));
+          item.appendChild(createElement('span', 'pcs-batch-details', `(${result.totalItems} items, ${result.totalWeight} lbs total)`));
         }
       } else if (processingBatches.has(batchId)) {
-        item.innerHTML = `
-          <span class="pcs-batch-id">${batchId}</span>
-          <span class="pcs-loading">Loading...</span>
-        `;
+        item.appendChild(createElement('span', 'pcs-loading', 'Loading...'));
       } else {
-        const extraInfo = apiData ? `${apiData.totalUnits || '?'} units` : '';
-        item.innerHTML = `
-          <span class="pcs-batch-id">${batchId}</span>
-          ${extraInfo ? `<span class="pcs-batch-details">${extraInfo}</span>` : ''}
-          <button class="pcs-fetch-btn" data-batch-id="${batchId}">Fetch Weight</button>
-        `;
+        if (apiData && apiData.totalUnits) {
+          item.appendChild(createElement('span', 'pcs-batch-details', `${apiData.totalUnits} units`));
+        }
+        const fetchBtn = createElement('button', 'pcs-fetch-btn', 'Fetch Weight');
+        fetchBtn.dataset.batchId = batchId;
+        item.appendChild(fetchBtn);
       }
 
       container.appendChild(item);
