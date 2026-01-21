@@ -1,6 +1,6 @@
 // Picking Console Content Script
 // Adds weight information to the batch grid
-// Uses direct HTTP requests via background script (no other tabs needed)
+// Uses Picking Console JSON API + background script for Rodeo/FC Research data
 
 (function() {
   'use strict';
@@ -36,6 +36,7 @@
   let isInitialized = false;
   let processingBatches = new Set();
   let batchResults = new Map();
+  let batchDataFromAPI = [];
 
   // Extract warehouse ID from URL (e.g., IND8 from /fc/IND8/)
   function extractWarehouseId() {
@@ -75,11 +76,11 @@
     // Observe for dynamic content changes
     observeContent();
 
-    // Initial scan for batch IDs
-    setTimeout(scanForBatches, 1000);
+    // Initial fetch from API
+    setTimeout(fetchBatchesFromAPI, 1000);
 
     isInitialized = true;
-    log('✓ Initialization complete');
+    log('Initialization complete');
   }
 
   // Set up event delegation for fetch button clicks
@@ -104,6 +105,72 @@
     log('Global click handler attached');
   }
 
+  // Fetch batches from Picking Console API
+  async function fetchBatchesFromAPI() {
+    log('Fetching batches from API...');
+    updateStatus('Fetching batches from API...');
+
+    try {
+      // Try different status endpoints
+      const statuses = ['Ready', 'InProgress', 'All'];
+      let allBatches = [];
+
+      for (const status of statuses) {
+        const url = `https://picking-console.na.picking.aft.a2z.com/api/fcs/${CONFIG.warehouseId}/batch-info/${status}`;
+        log(`Fetching: ${url}`);
+
+        try {
+          const response = await fetch(url, {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+              'Accept': 'application/json'
+            }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            log(`API response for ${status}:`, data);
+
+            if (data.pickBatchInformationList && Array.isArray(data.pickBatchInformationList)) {
+              allBatches = allBatches.concat(data.pickBatchInformationList);
+              log(`Found ${data.pickBatchInformationList.length} batches in ${status}`);
+            }
+          } else {
+            log(`API request failed for ${status}: ${response.status}`);
+          }
+        } catch (err) {
+          log(`API request error for ${status}:`, err.message);
+        }
+      }
+
+      // Deduplicate by batchId
+      const uniqueBatches = [];
+      const seenIds = new Set();
+      for (const batch of allBatches) {
+        if (batch.batchId && !seenIds.has(batch.batchId)) {
+          seenIds.add(batch.batchId);
+          uniqueBatches.push(batch);
+        }
+      }
+
+      batchDataFromAPI = uniqueBatches;
+      log(`Total unique batches from API: ${batchDataFromAPI.length}`);
+
+      // Update UI
+      updateBatchList(batchDataFromAPI.map(b => b.batchId));
+      document.getElementById('pcs-batches-count').textContent = batchDataFromAPI.length;
+      updateStatus(`Found ${batchDataFromAPI.length} batches from API`);
+
+      return batchDataFromAPI;
+    } catch (error) {
+      logError('API fetch error:', error);
+      updateStatus(`API error: ${error.message}. Falling back to page scan.`);
+      // Fallback to scanning the page
+      return scanForBatches();
+    }
+  }
+
   // Create floating panel
   function createFloatingPanel() {
     log('Creating floating panel...');
@@ -112,11 +179,11 @@
     panel.id = 'pcs-panel';
     panel.innerHTML = `
       <div class="pcs-header">
-        <span class="pcs-title">📦 Size Calculator</span>
-        <button class="pcs-minimize" title="Minimize">−</button>
+        <span class="pcs-title">Size Calculator</span>
+        <button class="pcs-minimize" title="Minimize">-</button>
       </div>
       <div class="pcs-content">
-        <div class="pcs-status">Ready - Click a batch ID to fetch weight</div>
+        <div class="pcs-status">Initializing...</div>
         <div class="pcs-stats">
           <div class="pcs-stat">
             <span class="pcs-stat-label">Warehouse:</span>
@@ -128,12 +195,12 @@
           </div>
         </div>
         <div class="pcs-actions">
-          <button id="pcs-scan" class="pcs-btn pcs-btn-primary">Scan for Batches</button>
+          <button id="pcs-refresh" class="pcs-btn pcs-btn-primary">Refresh Batches</button>
           <button id="pcs-fetch-all" class="pcs-btn">Fetch All Weights</button>
           <button id="pcs-clear-cache" class="pcs-btn">Clear Cache</button>
         </div>
         <div class="pcs-batch-list" id="pcs-batch-list">
-          <div class="pcs-batch-list-header">Batch IDs (click to fetch):</div>
+          <div class="pcs-batch-list-header">Batches (click Fetch for weight):</div>
           <div class="pcs-batch-list-items" id="pcs-batch-items"></div>
         </div>
       </div>
@@ -146,9 +213,9 @@
       panel.classList.toggle('pcs-minimized');
     });
 
-    panel.querySelector('#pcs-scan').addEventListener('click', () => {
-      log('Scan button clicked');
-      scanForBatches();
+    panel.querySelector('#pcs-refresh').addEventListener('click', () => {
+      log('Refresh button clicked');
+      fetchBatchesFromAPI();
     });
 
     panel.querySelector('#pcs-fetch-all').addEventListener('click', () => {
@@ -201,9 +268,12 @@
       // Debounce re-scanning
       clearTimeout(observeContent.timeout);
       observeContent.timeout = setTimeout(() => {
-        log('Content changed, re-scanning...');
-        scanForBatches();
-      }, 500);
+        // Only re-fetch if we don't have data yet
+        if (batchDataFromAPI.length === 0) {
+          log('Content changed, re-fetching...');
+          fetchBatchesFromAPI();
+        }
+      }, 2000);
     });
 
     observer.observe(document.body, {
@@ -214,9 +284,9 @@
     log('Content observer active');
   }
 
-  // Scan the page for batch IDs
+  // Fallback: Scan the page for batch IDs
   function scanForBatches() {
-    log('Scanning for batch IDs...');
+    log('Scanning page for batch IDs (fallback)...');
 
     const batchIds = new Set();
 
@@ -228,7 +298,6 @@
       // Check if text is a batch ID (8+ digits)
       if (/^\d{8,}$/.test(text)) {
         batchIds.add(text);
-        log(`Found batch ID in link: ${text}`);
       }
 
       // Check href for batch ID
@@ -243,7 +312,6 @@
       const text = cell.textContent.trim();
       if (/^\d{8,}$/.test(text)) {
         batchIds.add(text);
-        log(`Found batch ID in cell: ${text}`);
       }
     });
 
@@ -252,7 +320,6 @@
     const batchPattern = /\b(\d{8,})\b/g;
     let match;
     while ((match = batchPattern.exec(pageText)) !== null) {
-      // Only include if it looks like a batch ID (not a timestamp or other number)
       const num = match[1];
       if (num.length >= 8 && num.length <= 12) {
         batchIds.add(num);
@@ -260,7 +327,7 @@
     }
 
     const batchArray = Array.from(batchIds);
-    log(`Found ${batchArray.length} batch IDs:`, batchArray);
+    log(`Found ${batchArray.length} batch IDs via page scan:`, batchArray);
 
     // Update UI
     updateBatchList(batchArray);
@@ -281,29 +348,34 @@
       item.className = 'pcs-batch-item';
       item.dataset.batchId = batchId;
 
+      // Find API data for this batch
+      const apiData = batchDataFromAPI.find(b => b.batchId === batchId);
       const result = batchResults.get(batchId);
+
       if (result) {
         if (result.error) {
           item.innerHTML = `
             <span class="pcs-batch-id">${batchId}</span>
-            <span class="pcs-batch-error" title="${result.error}">❌</span>
+            <span class="pcs-batch-error" title="${result.error}">Error</span>
           `;
         } else {
           item.innerHTML = `
             <span class="pcs-batch-id">${batchId}</span>
-            <span class="pcs-batch-weight">${result.averageWeight} lbs</span>
+            <span class="pcs-batch-weight">${result.averageWeight} lbs avg</span>
             <span class="pcs-batch-details">(${result.totalItems} items, ${result.totalWeight} lbs total)</span>
           `;
         }
       } else if (processingBatches.has(batchId)) {
         item.innerHTML = `
           <span class="pcs-batch-id">${batchId}</span>
-          <span class="pcs-loading">⏳</span>
+          <span class="pcs-loading">Loading...</span>
         `;
       } else {
+        const extraInfo = apiData ? `${apiData.totalUnits || '?'} units` : '';
         item.innerHTML = `
           <span class="pcs-batch-id">${batchId}</span>
-          <button class="pcs-fetch-btn" data-batch-id="${batchId}">⚖️ Fetch</button>
+          ${extraInfo ? `<span class="pcs-batch-details">${extraInfo}</span>` : ''}
+          <button class="pcs-fetch-btn" data-batch-id="${batchId}">Fetch Weight</button>
         `;
       }
 
@@ -322,7 +394,7 @@
 
     processingBatches.add(batchId);
     updateStatus(`Fetching batch ${batchId}...`);
-    scanForBatches(); // Update UI to show loading
+    updateBatchList(batchDataFromAPI.length > 0 ? batchDataFromAPI.map(b => b.batchId) : scanForBatches());
 
     try {
       const result = await browser.runtime.sendMessage({
@@ -345,13 +417,13 @@
       updateStatus(`Error: ${error.message}`);
     } finally {
       processingBatches.delete(batchId);
-      scanForBatches(); // Update UI
+      updateBatchList(batchDataFromAPI.length > 0 ? batchDataFromAPI.map(b => b.batchId) : scanForBatches());
     }
   }
 
   // Fetch all batch weights
   async function fetchAllBatchWeights() {
-    const batchIds = scanForBatches();
+    const batchIds = batchDataFromAPI.length > 0 ? batchDataFromAPI.map(b => b.batchId) : scanForBatches();
     const unfetched = batchIds.filter(id => !batchResults.has(id) && !processingBatches.has(id));
 
     if (unfetched.length === 0) {
@@ -374,7 +446,7 @@
     log('Clearing cache...');
     await browser.runtime.sendMessage({ type: 'clearCache' });
     batchResults.clear();
-    scanForBatches();
+    updateBatchList(batchDataFromAPI.length > 0 ? batchDataFromAPI.map(b => b.batchId) : scanForBatches());
     updateStatus('Cache cleared');
   }
 
