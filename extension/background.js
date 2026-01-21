@@ -292,7 +292,7 @@ function parseRodeoFNSKUs(html) {
   return fnskus;
 }
 
-// Fetch weight from FC Research via direct HTTP request
+// Fetch weight from FC Research via direct HTTP POST to /results/product endpoint
 async function fetchWeightFromFCResearch(fnsku, warehouseId) {
   // Check cache first
   const cacheKey = `${warehouseId}:${fnsku}`;
@@ -302,30 +302,32 @@ async function fetchWeightFromFCResearch(fnsku, warehouseId) {
     return { fnsku, weight: cached.weight, fromCache: true };
   }
 
-  // Try multiple URL patterns for FC Research
-  const urls = [
-    `https://fcresearch-na.aka.amazon.com/${warehouseId}/results?s=${fnsku}`,
-    `https://fcresearch-na.aka.amazon.com/results?s=${fnsku}&fc=${warehouseId}`,
-    `https://fcresearch.aka.amazon.com/${warehouseId}/results?s=${fnsku}`
+  // Use the direct /results/product POST endpoint (much cleaner than parsing full page)
+  const productEndpoints = [
+    `https://fcresearch-na.aka.amazon.com/${warehouseId}/results/product`,
+    `https://fcresearch.aka.amazon.com/${warehouseId}/results/product`
   ];
 
-  for (const url of urls) {
-    log(`Trying FC Research URL: ${url}`);
+  for (const url of productEndpoints) {
+    log(`Trying FC Research product endpoint: ${url}`);
 
     try {
       const response = await fetch(url, {
-        method: 'GET',
+        method: 'POST',
         credentials: 'include',
         headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5'
-        }
+          'Accept': 'text/html, */*; q=0.01',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: `s=${fnsku}`
       });
 
       log(`FC Research response status for ${fnsku}: ${response.status}`);
 
       if (!response.ok) {
-        log(`Request failed, trying next URL...`);
+        log(`Request failed, trying next endpoint...`);
         continue;
       }
 
@@ -333,12 +335,12 @@ async function fetchWeightFromFCResearch(fnsku, warehouseId) {
       log(`FC Research response length for ${fnsku}: ${html.length} chars`);
 
       // Check if we got a valid response
-      if (html.includes('Sign in') || html.includes('Login') || html.length < 500) {
-        log('Got login page or error, trying next URL...');
+      if (html.includes('Sign in') || html.includes('Login') || html.length < 100) {
+        log('Got login page or error, trying next endpoint...');
         continue;
       }
 
-      // Parse HTML to extract weight
+      // Parse HTML to extract weight from the product table
       const weight = parseFCResearchWeight(html, fnsku);
 
       if (weight !== null) {
@@ -356,32 +358,44 @@ async function fetchWeightFromFCResearch(fnsku, warehouseId) {
 }
 
 // Parse FC Research HTML to extract weight in pounds
+// The /results/product endpoint returns clean HTML like:
+// <tr><th>Weight</th><td>2.36 pounds</td></tr>
 function parseFCResearchWeight(html, fnsku) {
   log(`Parsing FC Research HTML for weight (${fnsku})...`);
 
-  // Method 1: Look for Weight row in table with various formats
-  // Pattern: <td>Weight</td><td>0.79 pounds</td>
-  const patterns = [
+  // Primary pattern: Weight row in product table (from /results/product endpoint)
+  // Format: <tr><th>Weight</th><td>2.36 pounds</td></tr>
+  const primaryPattern = /<th>Weight<\/th>\s*<td>(\d+\.?\d*)\s*pounds?<\/td>/i;
+  const primaryMatch = html.match(primaryPattern);
+  if (primaryMatch) {
+    const weight = parseFloat(primaryMatch[1]);
+    if (!isNaN(weight) && weight > 0 && weight < 1000) {
+      log(`Primary pattern: found weight ${weight} lbs`);
+      return weight;
+    }
+  }
+
+  // Fallback patterns for other response formats
+  const fallbackPatterns = [
     /<t[dh][^>]*>\s*Weight\s*<\/t[dh]>\s*<td[^>]*>\s*([\d.]+)\s*(?:pounds?|lbs?|lb)/i,
     /<t[dh][^>]*>Weight<\/t[dh]>\s*<td[^>]*>([\d.]+)/i,
     /Weight[:\s]*<[^>]*>([\d.]+)\s*(?:pounds?|lbs?|lb)/i,
     /Weight[:\s]*([\d.]+)\s*(?:pounds?|lbs?|lb)/i,
-    /"weight"[:\s]*([\d.]+)/i,
-    /weight["\s:]+(\d+\.?\d*)/i
+    /"weight"[:\s]*([\d.]+)/i
   ];
 
-  for (let i = 0; i < patterns.length; i++) {
-    const match = html.match(patterns[i]);
+  for (let i = 0; i < fallbackPatterns.length; i++) {
+    const match = html.match(fallbackPatterns[i]);
     if (match) {
       const weight = parseFloat(match[1]);
       if (!isNaN(weight) && weight > 0 && weight < 1000) {
-        log(`Method ${i + 1}: found weight ${weight} lbs`);
+        log(`Fallback pattern ${i + 1}: found weight ${weight} lbs`);
         return weight;
       }
     }
   }
 
-  // Method: Look for pounds anywhere near numbers
+  // Last resort: Look for pounds anywhere near numbers
   const poundsPattern = /(\d+\.?\d*)\s*(?:pounds?|lbs?|lb)\b/gi;
   let match;
   while ((match = poundsPattern.exec(html)) !== null) {
