@@ -157,14 +157,15 @@
   function injectWeightsIntoTable() {
     log('Injecting weights into table...');
 
-    // First, find the Units column index from header
+    // First, find the Units column index from header (not "Total Units")
     let unitsColumnIndex = -1;
     const headerRow = document.querySelector('thead tr, [role="row"]:first-child');
     if (headerRow) {
       const headerCells = headerRow.querySelectorAll('th, td, [role="columnheader"], [role="cell"]');
       headerCells.forEach((cell, index) => {
         const text = cell.textContent.trim().toLowerCase();
-        if (text.includes('units') || text === 'units') {
+        // Match "Units" but NOT "Total Units"
+        if ((text === 'units' || text.includes('units')) && !text.includes('total')) {
           unitsColumnIndex = index;
           log(`Found Units column at index: ${unitsColumnIndex}`);
         }
