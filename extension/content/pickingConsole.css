@@ -5,7 +5,7 @@
   position: fixed;
   top: 80px;
   right: 20px;
-  width: 280px;
+  width: 320px;
   background: #1a1a2e;
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
@@ -14,10 +14,13 @@
   color: #ffffff;
   overflow: hidden;
   transition: all 0.3s ease;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
 }
 
 #pcs-panel.pcs-minimized {
-  width: 180px;
+  width: 200px;
 }
 
 #pcs-panel.pcs-minimized .pcs-content {
@@ -32,6 +35,7 @@
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   cursor: move;
   user-select: none;
+  flex-shrink: 0;
 }
 
 .pcs-title {
@@ -58,6 +62,8 @@
 
 .pcs-content {
   padding: 16px;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .pcs-status {
@@ -71,7 +77,7 @@
 }
 
 .pcs-stats {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .pcs-stat {
@@ -99,6 +105,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-bottom: 16px;
 }
 
 .pcs-btn {
@@ -126,42 +133,78 @@
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
-/* Table Enhancement */
-.pcs-weight-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-  color: white !important;
-  font-weight: 600;
-  padding: 8px 12px !important;
-  text-align: center !important;
-  min-width: 100px;
-  white-space: nowrap;
+/* Batch List */
+.pcs-batch-list {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 12px;
 }
 
-.pcs-weight-cell {
-  text-align: center !important;
-  padding: 6px 10px !important;
-  vertical-align: middle !important;
-  min-width: 100px;
+.pcs-batch-list-header {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pcs-batch-list-items {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.pcs-batch-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.pcs-batch-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.pcs-batch-id {
+  font-family: 'Monaco', 'Menlo', monospace;
+  color: #64b5f6;
+  min-width: 80px;
+}
+
+.pcs-batch-weight {
+  color: #4CAF50;
+  font-weight: 600;
+}
+
+.pcs-batch-details {
+  color: #888;
+  font-size: 10px;
+}
+
+.pcs-batch-error {
+  color: #f44336;
 }
 
 .pcs-fetch-btn {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
-  border-radius: 6px;
-  padding: 6px 12px;
+  border-radius: 4px;
+  padding: 4px 8px;
   cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
+  font-size: 11px;
   color: white;
+  transition: all 0.2s;
+  margin-left: auto;
 }
 
 .pcs-fetch-btn:hover {
-  transform: scale(1.1);
+  transform: scale(1.05);
   box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
 }
 
 .pcs-loading {
-  display: inline-block;
   animation: pcs-spin 1s linear infinite;
 }
 
@@ -170,153 +213,25 @@
   to { transform: rotate(360deg); }
 }
 
-.pcs-error {
-  cursor: help;
+/* Scrollbar styling */
+.pcs-batch-list-items::-webkit-scrollbar,
+.pcs-content::-webkit-scrollbar {
+  width: 6px;
 }
 
-.pcs-weight-value {
-  display: inline-block;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-  font-size: 13px;
-  cursor: help;
+.pcs-batch-list-items::-webkit-scrollbar-track,
+.pcs-content::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
 }
 
-.pcs-weight-normal {
-  background: #e3f2fd;
-  color: #1565c0;
+.pcs-batch-list-items::-webkit-scrollbar-thumb,
+.pcs-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
 }
 
-.pcs-weight-light {
-  background: #e8f5e9;
-  color: #2e7d32;
-}
-
-.pcs-weight-heavy {
-  background: #fff3e0;
-  color: #e65100;
-}
-
-.pcs-weight-total {
-  display: block;
-  font-size: 10px;
-  color: #888;
-  margin-top: 2px;
-}
-
-/* Connection Status */
-.pcs-connection-status {
-  margin-bottom: 12px;
-  padding: 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  text-align: center;
-}
-
-.pcs-status-ok {
-  background: rgba(76, 175, 80, 0.2);
-  border: 1px solid rgba(76, 175, 80, 0.4);
-}
-
-.pcs-status-warning {
-  background: rgba(255, 152, 0, 0.2);
-  border: 1px solid rgba(255, 152, 0, 0.4);
-}
-
-.pcs-connected {
-  color: #4CAF50;
-  font-weight: 600;
-}
-
-.pcs-disconnected {
-  color: #FF9800;
-  font-weight: 600;
-}
-
-.pcs-tab-links {
-  margin-top: 8px;
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.pcs-tab-links a {
-  color: #667eea;
-  text-decoration: none;
-  padding: 4px 8px;
-  background: rgba(102, 126, 234, 0.2);
-  border-radius: 4px;
-  font-size: 11px;
-}
-
-.pcs-tab-links a:hover {
-  background: rgba(102, 126, 234, 0.3);
-  text-decoration: underline;
-}
-
-/* Debug Section */
-.pcs-debug {
-  margin-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 12px;
-}
-
-.pcs-debug summary {
-  cursor: pointer;
-  font-size: 11px;
-  color: #888;
-  user-select: none;
-}
-
-.pcs-debug summary:hover {
-  color: #aaa;
-}
-
-.pcs-debug pre {
-  margin-top: 8px;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 4px;
-  font-size: 10px;
-  font-family: 'Monaco', 'Menlo', monospace;
-  color: #aaa;
-  max-height: 150px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-/* Disabled button state */
-.pcs-btn:disabled,
-.pcs-fetch-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none !important;
-  box-shadow: none !important;
-}
-
-.pcs-btn:disabled:hover,
-.pcs-fetch-btn:disabled:hover {
-  transform: none !important;
-  box-shadow: none !important;
-}
-
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-  .pcs-weight-normal {
-    background: rgba(21, 101, 192, 0.2);
-    color: #64b5f6;
-  }
-
-  .pcs-weight-light {
-    background: rgba(46, 125, 50, 0.2);
-    color: #81c784;
-  }
-
-  .pcs-weight-heavy {
-    background: rgba(230, 81, 0, 0.2);
-    color: #ffb74d;
-  }
+.pcs-batch-list-items::-webkit-scrollbar-thumb:hover,
+.pcs-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
