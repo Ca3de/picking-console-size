@@ -476,10 +476,6 @@
           <button id="pcs-fetch-now" class="pcs-btn pcs-btn-primary" title="Fetch all weights now">Refresh</button>
           <button id="pcs-clear-cache" class="pcs-btn" title="Clear cached weights">Clear</button>
         </div>
-        <div class="pcs-batch-list" id="pcs-batch-list">
-          <div class="pcs-batch-list-header">Batches</div>
-          <div class="pcs-batch-list-items" id="pcs-batch-items"></div>
-        </div>
       </div>
     `;
 
