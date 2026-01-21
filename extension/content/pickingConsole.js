@@ -317,10 +317,14 @@
     // Observe for dynamic content changes
     observeContent();
 
-    // Initial fetch from API and start auto-fetch timer
+    // Initial fetch from API, auto-fetch all weights, and start timer
     setTimeout(async () => {
+      updateStatus('Loading batches...');
       await fetchBatchesFromAPI();
+      updateStatus('Auto-fetching all weights...');
+      await fetchAllBatchWeights();
       startAutoFetchTimer();
+      updateStatus(`Ready - ${batchDataFromAPI.length} batches loaded`);
     }, 1000);
 
     isInitialized = true;
@@ -440,41 +444,40 @@
     panel.innerHTML = `
       <div class="pcs-header">
         <span class="pcs-title">Size Calculator</span>
-        <button class="pcs-minimize" title="Minimize">-</button>
+        <button class="pcs-minimize" title="Minimize">−</button>
       </div>
       <div class="pcs-content">
         <div class="pcs-status">Initializing...</div>
         <div class="pcs-stats">
           <div class="pcs-stat">
-            <span class="pcs-stat-label">Warehouse:</span>
-            <span class="pcs-stat-value">${CONFIG.warehouseId}</span>
+            <div class="pcs-stat-label">Warehouse</div>
+            <div class="pcs-stat-value">${CONFIG.warehouseId}</div>
           </div>
           <div class="pcs-stat">
-            <span class="pcs-stat-label">State:</span>
-            <span class="pcs-stat-value" id="pcs-current-state">—</span>
+            <div class="pcs-stat-label">Batches</div>
+            <div class="pcs-stat-value" id="pcs-batches-count">0</div>
           </div>
           <div class="pcs-stat">
-            <span class="pcs-stat-label">Pick Process:</span>
-            <span class="pcs-stat-value" id="pcs-current-process">—</span>
+            <div class="pcs-stat-label">State</div>
+            <div class="pcs-stat-value" id="pcs-current-state">—</div>
           </div>
           <div class="pcs-stat">
-            <span class="pcs-stat-label">Batches:</span>
-            <span class="pcs-stat-value" id="pcs-batches-count">0</span>
+            <div class="pcs-stat-label">Process</div>
+            <div class="pcs-stat-value" id="pcs-current-process">—</div>
           </div>
         </div>
         <div class="pcs-auto-fetch">
           <div class="pcs-countdown">
-            <span class="pcs-countdown-label">Next auto-fetch:</span>
+            <span class="pcs-countdown-label">Next refresh:</span>
             <span class="pcs-countdown-value" id="pcs-countdown">--:--</span>
           </div>
         </div>
         <div class="pcs-actions">
-          <button id="pcs-fetch-now" class="pcs-btn pcs-btn-primary" title="Fetch all weights now and reset timer">Fetch All Now</button>
-          <button id="pcs-refresh" class="pcs-btn" title="Refresh batch list only">Refresh List</button>
-          <button id="pcs-clear-cache" class="pcs-btn">Clear Cache</button>
+          <button id="pcs-fetch-now" class="pcs-btn pcs-btn-primary" title="Fetch all weights now">Refresh</button>
+          <button id="pcs-clear-cache" class="pcs-btn" title="Clear cached weights">Clear</button>
         </div>
         <div class="pcs-batch-list" id="pcs-batch-list">
-          <div class="pcs-batch-list-header">Batches (click Fetch for weight):</div>
+          <div class="pcs-batch-list-header">Batches</div>
           <div class="pcs-batch-list-items" id="pcs-batch-items"></div>
         </div>
       </div>
@@ -488,13 +491,8 @@
     });
 
     panel.querySelector('#pcs-fetch-now').addEventListener('click', () => {
-      log('Fetch Now button clicked');
+      log('Refresh button clicked');
       fetchAllAndResetTimer();
-    });
-
-    panel.querySelector('#pcs-refresh').addEventListener('click', () => {
-      log('Refresh List button clicked');
-      fetchBatchesFromAPI();
     });
 
     panel.querySelector('#pcs-clear-cache').addEventListener('click', () => {
