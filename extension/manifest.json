@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Picking Console Size Calculator",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Fetches item weights from FC Research via Rodeo for picking batches and displays average weight in Picking Console",
   "author": "Ca3de",
   "homepage_url": "https://github.com/Ca3de/picking-console-size",
