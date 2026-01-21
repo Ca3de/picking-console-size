@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Picking Console Size Calculator</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="popup-header">
+      <div class="logo">📦</div>
+      <h1>Size Calculator</h1>
+    </header>
+
+    <section class="popup-section">
+      <h2>Status</h2>
+      <div class="status-grid">
+        <div class="status-item">
+          <span class="status-indicator" id="status-picking"></span>
+          <span>Picking Console</span>
+        </div>
+        <div class="status-item">
+          <span class="status-indicator" id="status-rodeo"></span>
+          <span>Rodeo</span>
+        </div>
+        <div class="status-item">
+          <span class="status-indicator" id="status-fcresearch"></span>
+          <span>FC Research</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="popup-section">
+      <h2>Cache</h2>
+      <div class="cache-info">
+        <span>Cached items:</span>
+        <span id="cache-count">0</span>
+      </div>
+      <button id="btn-clear-cache" class="btn btn-secondary">Clear Cache</button>
+    </section>
+
+    <section class="popup-section">
+      <h2>Instructions</h2>
+      <ol class="instructions">
+        <li>Open the <a href="https://picking-console.na.picking.aft.a2z.com" target="_blank">Picking Console</a></li>
+        <li>Navigate to pick-batches with MultiSlamPicking filter</li>
+        <li>Click the ⚖️ button on any batch row to fetch its average weight</li>
+        <li>Or click "Fetch All Weights" in the floating panel</li>
+      </ol>
+    </section>
+
+    <footer class="popup-footer">
+      <span>v1.0.0</span>
+      <a href="https://github.com/Ca3de/picking-console-size" target="_blank">GitHub</a>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+{
+  "manifest_version": 2,
+  "name": "Picking Console Size Calculator",
+  "version": "1.0.0",
+  "description": "Fetches item weights from FC Research via Rodeo for picking batches and displays average weight in Picking Console",
+  "author": "Ca3de",
+  "homepage_url": "https://github.com/Ca3de/picking-console-size",
+
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "*://picking-console.na.picking.aft.a2z.com/*",
+    "*://rodeo-iad.amazon.com/*",
+    "*://fcresearch-na.aka.amazon.com/*"
+  ],
+
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["*://picking-console.na.picking.aft.a2z.com/*"],
+      "js": ["content/pickingConsole.js"],
+      "css": ["content/pickingConsole.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://rodeo-iad.amazon.com/*"],
+      "js": ["content/rodeo.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://fcresearch-na.aka.amazon.com/*"],
+      "js": ["content/fcresearch.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "browser_action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    },
+    "default_title": "Picking Console Size Calculator"
+  },
+
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "picking-console-size@ca3de",
+      "strict_min_version": "109.0"
+    }
+  }
+}
