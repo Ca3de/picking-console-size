@@ -157,10 +157,27 @@
   function injectWeightsIntoTable() {
     log('Injecting weights into table...');
 
+    // First, find the Units column index from header
+    let unitsColumnIndex = -1;
+    const headerRow = document.querySelector('thead tr, [role="row"]:first-child');
+    if (headerRow) {
+      const headerCells = headerRow.querySelectorAll('th, td, [role="columnheader"], [role="cell"]');
+      headerCells.forEach((cell, index) => {
+        const text = cell.textContent.trim().toLowerCase();
+        if (text.includes('units') || text === 'units') {
+          unitsColumnIndex = index;
+          log(`Found Units column at index: ${unitsColumnIndex}`);
+        }
+      });
+    }
+
     // Find all table rows
     const rows = document.querySelectorAll('tr, [role="row"]');
 
     for (const row of rows) {
+      // Skip header row
+      if (row.querySelector('th, [role="columnheader"]')) continue;
+
       // Find batch ID in this row
       let batchId = null;
       const links = row.querySelectorAll('a');
@@ -190,25 +207,41 @@
         continue;
       }
 
-      // Find the Units cell to inject after
+      // Find the Units cell
       const cells = row.querySelectorAll('td, [role="cell"], [role="gridcell"]');
       let unitsCell = null;
 
-      for (const cell of cells) {
-        // Find cell with unit count (number in a badge or just a number)
-        const badge = cell.querySelector('[class*="badge"], [class*="pill"]');
-        if (badge) {
-          const text = badge.textContent.trim();
-          if (/^\d+$/.test(text)) {
-            unitsCell = cell;
-            break;
+      // Method 1: Use column index from header if found
+      if (unitsColumnIndex >= 0 && cells.length > unitsColumnIndex) {
+        unitsCell = cells[unitsColumnIndex];
+      }
+
+      // Method 2: Find cell with badge containing large number (Units > 20, Priority is usually 1-10)
+      if (!unitsCell) {
+        for (const cell of cells) {
+          const badge = cell.querySelector('[class*="badge"], [class*="pill"]');
+          if (badge) {
+            const text = badge.textContent.trim();
+            const num = parseInt(text, 10);
+            // Units are typically > 20, Priority is typically 1-10
+            if (!isNaN(num) && num > 20) {
+              unitsCell = cell;
+              break;
+            }
           }
         }
       }
 
-      // If no badge found, look for the 6th cell (Units column based on screenshot)
-      if (!unitsCell && cells.length >= 6) {
-        unitsCell = cells[5]; // 0-indexed, so 5 is the 6th column
+      // Method 3: Look for the last cell with a numeric badge (Units comes after Priority)
+      if (!unitsCell) {
+        let lastBadgeCell = null;
+        for (const cell of cells) {
+          const badge = cell.querySelector('[class*="badge"], [class*="pill"]');
+          if (badge && /^\d+$/.test(badge.textContent.trim())) {
+            lastBadgeCell = cell;
+          }
+        }
+        unitsCell = lastBadgeCell;
       }
 
       if (unitsCell) {
@@ -507,16 +540,29 @@
     const observer = new MutationObserver((mutations) => {
       // Debounce actions
       clearTimeout(observeContent.timeout);
-      observeContent.timeout = setTimeout(() => {
+      observeContent.timeout = setTimeout(async () => {
         // Check if filters changed
         const newState = detectCurrentState();
         const newProcess = detectPickProcessFilter();
 
         if (newState !== currentFilters.state || newProcess !== currentFilters.pickProcess) {
-          log('Filters changed, re-fetching...');
+          log(`Filters changed: ${currentFilters.state}/${currentFilters.pickProcess} -> ${newState}/${newProcess}`);
           currentFilters.state = newState;
           currentFilters.pickProcess = newProcess;
-          fetchBatchesFromAPI();
+
+          // Clear all cached weights - they're for different batches now
+          batchResults.clear();
+          log('Cleared weight cache due to filter change');
+
+          // Remove existing inline weight badges from table
+          document.querySelectorAll('.pcs-inline-weight').forEach(el => el.remove());
+          log('Removed inline weight badges');
+
+          // Refresh batch list and auto-fetch weights
+          await fetchBatchesFromAPI();
+          await fetchAllBatchWeights();
+
+          updateStatus(`Fetched weights for ${currentFilters.pickProcess || 'all'} batches in ${newState}`);
         } else {
           // Just re-inject weights into table (table may have re-rendered)
           injectWeightsIntoTable();
