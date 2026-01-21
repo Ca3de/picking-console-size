@@ -1,6 +1,6 @@
 // Picking Console Content Script
-// Adds weight information to the batch table
-// REQUIRES all 3 tabs to be open: Picking Console, Rodeo, FC Research
+// Adds weight information to the batch grid
+// Uses direct HTTP requests via background script (no other tabs needed)
 
 (function() {
   'use strict';
@@ -36,11 +36,6 @@
   let isInitialized = false;
   let processingBatches = new Set();
   let batchResults = new Map();
-  let connectionStatus = {
-    allConnected: false,
-    missing: ['Rodeo', 'FC Research'],
-    tabs: { pickingConsole: true, rodeo: false, fcresearch: false }
-  };
 
   // Extract warehouse ID from URL (e.g., IND8 from /fc/IND8/)
   function extractWarehouseId() {
@@ -62,73 +57,6 @@
     logError('contentScriptReady failed:', err);
   });
 
-  // Listen for connection status updates from background
-  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    log('Received message from background:', message.type);
-    log('Message content:', JSON.stringify(message, null, 2));
-
-    if (message.type === 'connectionStatusUpdate') {
-      connectionStatus = {
-        allConnected: message.allConnected,
-        missing: message.missing,
-        tabs: message.tabs
-      };
-      log('Connection status updated:', JSON.stringify(connectionStatus, null, 2));
-      updateConnectionDisplay();
-      sendResponse({ received: true });
-    }
-    return false;
-  });
-
-  // Check connection status periodically
-  async function checkConnectionStatus() {
-    log('Checking connection status...');
-    try {
-      const status = await browser.runtime.sendMessage({ type: 'checkConnections' });
-      log('Connection status response:', JSON.stringify(status, null, 2));
-      connectionStatus = status;
-      updateConnectionDisplay();
-    } catch (err) {
-      logError('Failed to check connections:', err);
-    }
-  }
-
-  // Update the connection display in the panel
-  function updateConnectionDisplay() {
-    const statusEl = document.querySelector('.pcs-connection-status');
-    if (!statusEl) return;
-
-    log('Updating connection display. All connected:', connectionStatus.allConnected);
-
-    if (connectionStatus.allConnected) {
-      statusEl.innerHTML = `
-        <span class="pcs-connected">✓ All tabs connected</span>
-      `;
-      statusEl.className = 'pcs-connection-status pcs-status-ok';
-
-      // Enable fetch buttons
-      document.querySelectorAll('.pcs-fetch-btn, #pcs-fetch-all').forEach(btn => {
-        btn.disabled = false;
-        btn.title = 'Fetch weight';
-      });
-    } else {
-      statusEl.innerHTML = `
-        <span class="pcs-disconnected">⚠ Missing: ${connectionStatus.missing.join(', ')}</span>
-        <div class="pcs-tab-links">
-          ${!connectionStatus.tabs.rodeo ? '<a href="https://rodeo-iad.amazon.com/' + CONFIG.warehouseId + '/" target="_blank">Open Rodeo</a>' : ''}
-          ${!connectionStatus.tabs.fcresearch ? '<a href="https://fcresearch-na.aka.amazon.com/' + CONFIG.warehouseId + '/" target="_blank">Open FC Research</a>' : ''}
-        </div>
-      `;
-      statusEl.className = 'pcs-connection-status pcs-status-warning';
-
-      // Disable fetch buttons
-      document.querySelectorAll('.pcs-fetch-btn, #pcs-fetch-all').forEach(btn => {
-        btn.disabled = true;
-        btn.title = 'Open all required tabs first';
-      });
-    }
-  }
-
   // Initialize when DOM is ready
   function init() {
     if (isInitialized) {
@@ -138,29 +66,45 @@
 
     log('Initializing...');
 
-    // Set up global click handler FIRST (event delegation)
+    // Set up global click handler (event delegation)
     setupClickHandler();
 
     // Create floating panel
     createFloatingPanel();
 
-    // Observe table for changes
-    observeTable();
+    // Observe for dynamic content changes
+    observeContent();
 
-    // Initial enhancement
-    enhanceTable();
-
-    // Check connection status
-    checkConnectionStatus();
-
-    // Periodically check connection status
-    setInterval(checkConnectionStatus, 5000);
+    // Initial scan for batch IDs
+    setTimeout(scanForBatches, 1000);
 
     isInitialized = true;
     log('✓ Initialization complete');
   }
 
-  // Create floating panel with controls
+  // Set up event delegation for fetch button clicks
+  let clickHandlerAttached = false;
+  function setupClickHandler() {
+    if (clickHandlerAttached) return;
+    clickHandlerAttached = true;
+
+    log('Setting up global click handler...');
+
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.pcs-fetch-btn');
+      if (btn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const batchId = btn.dataset.batchId;
+        log(`Fetch button clicked for batch: ${batchId}`);
+        fetchBatchWeight(batchId);
+      }
+    });
+
+    log('Global click handler attached');
+  }
+
+  // Create floating panel
   function createFloatingPanel() {
     log('Creating floating panel...');
 
@@ -172,10 +116,7 @@
         <button class="pcs-minimize" title="Minimize">−</button>
       </div>
       <div class="pcs-content">
-        <div class="pcs-connection-status pcs-status-warning">
-          <span class="pcs-disconnected">Checking connections...</span>
-        </div>
-        <div class="pcs-status">Ready</div>
+        <div class="pcs-status">Ready - Click a batch ID to fetch weight</div>
         <div class="pcs-stats">
           <div class="pcs-stat">
             <span class="pcs-stat-label">Warehouse:</span>
@@ -185,32 +126,29 @@
             <span class="pcs-stat-label">Batches Found:</span>
             <span class="pcs-stat-value" id="pcs-batches-count">0</span>
           </div>
-          <div class="pcs-stat">
-            <span class="pcs-stat-label">Cache Size:</span>
-            <span class="pcs-stat-value" id="pcs-cache-count">0</span>
-          </div>
         </div>
         <div class="pcs-actions">
-          <button id="pcs-fetch-all" class="pcs-btn pcs-btn-primary" disabled>Fetch All Weights</button>
+          <button id="pcs-scan" class="pcs-btn pcs-btn-primary">Scan for Batches</button>
+          <button id="pcs-fetch-all" class="pcs-btn">Fetch All Weights</button>
           <button id="pcs-clear-cache" class="pcs-btn">Clear Cache</button>
-          <button id="pcs-check-conn" class="pcs-btn">Check Connections</button>
         </div>
-        <div class="pcs-debug">
-          <details>
-            <summary>Debug Info</summary>
-            <pre id="pcs-debug-log"></pre>
-          </details>
+        <div class="pcs-batch-list" id="pcs-batch-list">
+          <div class="pcs-batch-list-header">Batch IDs (click to fetch):</div>
+          <div class="pcs-batch-list-items" id="pcs-batch-items"></div>
         </div>
       </div>
     `;
 
     document.body.appendChild(panel);
-    log('Panel added to DOM');
 
     // Event listeners
     panel.querySelector('.pcs-minimize').addEventListener('click', () => {
       panel.classList.toggle('pcs-minimized');
-      log('Panel minimized:', panel.classList.contains('pcs-minimized'));
+    });
+
+    panel.querySelector('#pcs-scan').addEventListener('click', () => {
+      log('Scan button clicked');
+      scanForBatches();
     });
 
     panel.querySelector('#pcs-fetch-all').addEventListener('click', () => {
@@ -223,28 +161,8 @@
       clearCache();
     });
 
-    panel.querySelector('#pcs-check-conn').addEventListener('click', () => {
-      log('Check Connections button clicked');
-      checkConnectionStatus();
-    });
-
-    // Make draggable
     makeDraggable(panel);
-    log('Panel setup complete');
-  }
-
-  // Add debug log to panel
-  function addDebugLog(message) {
-    const debugEl = document.getElementById('pcs-debug-log');
-    if (debugEl) {
-      const timestamp = new Date().toISOString().substr(11, 8);
-      debugEl.textContent += `[${timestamp}] ${message}\n`;
-      // Keep only last 50 lines
-      const lines = debugEl.textContent.split('\n');
-      if (lines.length > 50) {
-        debugEl.textContent = lines.slice(-50).join('\n');
-      }
-    }
+    log('Panel created');
   }
 
   // Make panel draggable
@@ -275,22 +193,17 @@
     });
   }
 
-  // Observe table for dynamic updates
-  function observeTable() {
-    log('Setting up table observer...');
+  // Observe for dynamic content changes
+  function observeContent() {
+    log('Setting up content observer...');
 
     const observer = new MutationObserver((mutations) => {
-      let shouldUpdate = false;
-      for (const mutation of mutations) {
-        if (mutation.addedNodes.length > 0 || mutation.type === 'childList') {
-          shouldUpdate = true;
-          break;
-        }
-      }
-      if (shouldUpdate) {
-        log('Table mutation detected, re-enhancing...');
-        setTimeout(enhanceTable, 100);
-      }
+      // Debounce re-scanning
+      clearTimeout(observeContent.timeout);
+      observeContent.timeout = setTimeout(() => {
+        log('Content changed, re-scanning...');
+        scanForBatches();
+      }, 500);
     });
 
     observer.observe(document.body, {
@@ -298,332 +211,171 @@
       subtree: true
     });
 
-    log('Table observer active');
+    log('Content observer active');
   }
 
-  // Set up event delegation for fetch button clicks (only once)
-  let clickHandlerAttached = false;
-  function setupClickHandler() {
-    if (clickHandlerAttached) return;
-    clickHandlerAttached = true;
+  // Scan the page for batch IDs
+  function scanForBatches() {
+    log('Scanning for batch IDs...');
 
-    log('Setting up global click handler for fetch buttons...');
+    const batchIds = new Set();
 
-    document.addEventListener('click', (e) => {
-      const btn = e.target.closest('.pcs-fetch-btn');
-      if (btn) {
-        e.preventDefault();
-        e.stopPropagation();
-        const batchId = btn.dataset.batchId;
-        log(`Fetch button clicked for batch: ${batchId}`);
-        if (btn.disabled) {
-          log('Button is disabled, ignoring click');
-          return;
-        }
-        fetchBatchWeight(batchId);
+    // Method 1: Look for links containing batch IDs (8+ digit numbers)
+    document.querySelectorAll('a').forEach(link => {
+      const href = link.href || '';
+      const text = link.textContent.trim();
+
+      // Check if text is a batch ID (8+ digits)
+      if (/^\d{8,}$/.test(text)) {
+        batchIds.add(text);
+        log(`Found batch ID in link: ${text}`);
+      }
+
+      // Check href for batch ID
+      const hrefMatch = href.match(/[?&]?(?:batch|id)=?(\d{8,})/i);
+      if (hrefMatch) {
+        batchIds.add(hrefMatch[1]);
       }
     });
 
-    log('Global click handler attached');
+    // Method 2: Look for batch IDs in table cells or grid cells
+    document.querySelectorAll('td, [role="cell"], [role="gridcell"], [class*="cell"]').forEach(cell => {
+      const text = cell.textContent.trim();
+      if (/^\d{8,}$/.test(text)) {
+        batchIds.add(text);
+        log(`Found batch ID in cell: ${text}`);
+      }
+    });
+
+    // Method 3: Look for batch IDs near "Batch" labels
+    const pageText = document.body.innerText;
+    const batchPattern = /\b(\d{8,})\b/g;
+    let match;
+    while ((match = batchPattern.exec(pageText)) !== null) {
+      // Only include if it looks like a batch ID (not a timestamp or other number)
+      const num = match[1];
+      if (num.length >= 8 && num.length <= 12) {
+        batchIds.add(num);
+      }
+    }
+
+    const batchArray = Array.from(batchIds);
+    log(`Found ${batchArray.length} batch IDs:`, batchArray);
+
+    // Update UI
+    updateBatchList(batchArray);
+    document.getElementById('pcs-batches-count').textContent = batchArray.length;
+
+    return batchArray;
   }
 
-  // Enhance the batch table with weight column
-  function enhanceTable() {
-    log('Enhancing table...');
+  // Update the batch list in the panel
+  function updateBatchList(batchIds) {
+    const container = document.getElementById('pcs-batch-items');
+    if (!container) return;
 
-    // Find the batch table - look for table with Batch ID column
-    const tables = document.querySelectorAll('table');
-    log(`Found ${tables.length} tables on page`);
+    container.innerHTML = '';
 
-    let batchCount = 0;
+    batchIds.forEach(batchId => {
+      const item = document.createElement('div');
+      item.className = 'pcs-batch-item';
+      item.dataset.batchId = batchId;
 
-    for (const table of tables) {
-      const headerRow = table.querySelector('thead tr, tr:first-child');
-      if (!headerRow) {
-        log('Table has no header row, skipping');
-        continue;
-      }
-
-      const headers = headerRow.querySelectorAll('th, td');
-      let batchIdIndex = -1;
-
-      // Find Batch ID column
-      headers.forEach((header, index) => {
-        const text = header.textContent.toLowerCase();
-        if (text.includes('batch') || text.includes('bat...')) {
-          batchIdIndex = index;
-          log(`Found batch column at index ${index}: "${header.textContent}"`);
-        }
-      });
-
-      if (batchIdIndex === -1) {
-        log('No batch column found in table, skipping');
-        continue;
-      }
-
-      // Check if we already added our column
-      if (headerRow.querySelector('.pcs-weight-header')) {
-        log('Weight column already exists');
-        continue;
-      }
-
-      log('Adding weight column to table...');
-
-      // Add weight header
-      const weightHeader = document.createElement('th');
-      weightHeader.className = 'pcs-weight-header';
-      weightHeader.innerHTML = '<span title="Average item weight in pounds">Avg Wt (lbs)</span>';
-      headerRow.appendChild(weightHeader);
-
-      // Add weight cells to each data row
-      const rows = table.querySelectorAll('tbody tr, tr:not(:first-child)');
-      log(`Processing ${rows.length} data rows`);
-
-      rows.forEach((row, rowIndex) => {
-        if (row.querySelector('.pcs-weight-cell')) return;
-
-        const cells = row.querySelectorAll('td');
-        if (cells.length <= batchIdIndex) return;
-
-        const batchCell = cells[batchIdIndex];
-        const batchId = extractBatchId(batchCell);
-
-        if (!batchId) {
-          log(`Row ${rowIndex}: No batch ID found`);
-          return;
-        }
-
-        batchCount++;
-        log(`Row ${rowIndex}: Batch ID = ${batchId}`);
-
-        const weightCell = document.createElement('td');
-        weightCell.className = 'pcs-weight-cell';
-        weightCell.dataset.batchId = batchId;
-
-        // Check if we have cached results
-        if (batchResults.has(batchId)) {
-          const result = batchResults.get(batchId);
-          updateWeightCell(weightCell, result);
+      const result = batchResults.get(batchId);
+      if (result) {
+        if (result.error) {
+          item.innerHTML = `
+            <span class="pcs-batch-id">${batchId}</span>
+            <span class="pcs-batch-error" title="${result.error}">❌</span>
+          `;
         } else {
-          weightCell.innerHTML = `
-            <button class="pcs-fetch-btn" data-batch-id="${batchId}" title="Fetch weight" ${!connectionStatus.allConnected ? 'disabled' : ''}>
-              ⚖️
-            </button>
+          item.innerHTML = `
+            <span class="pcs-batch-id">${batchId}</span>
+            <span class="pcs-batch-weight">${result.averageWeight} lbs</span>
+            <span class="pcs-batch-details">(${result.totalItems} items, ${result.totalWeight} lbs total)</span>
           `;
         }
+      } else if (processingBatches.has(batchId)) {
+        item.innerHTML = `
+          <span class="pcs-batch-id">${batchId}</span>
+          <span class="pcs-loading">⏳</span>
+        `;
+      } else {
+        item.innerHTML = `
+          <span class="pcs-batch-id">${batchId}</span>
+          <button class="pcs-fetch-btn" data-batch-id="${batchId}">⚖️ Fetch</button>
+        `;
+      }
 
-        row.appendChild(weightCell);
-      });
-
-      // Update batch count
-      document.getElementById('pcs-batches-count').textContent = batchCount;
-      log(`Total batches found: ${batchCount}`);
-
-      // Click handlers are set up via event delegation in setupClickHandler()
-    }
-
-    log('Table enhancement complete');
-  }
-
-  // Extract batch ID from cell
-  function extractBatchId(cell) {
-    // Try to find a link first
-    const link = cell.querySelector('a');
-    if (link) {
-      const text = link.textContent.trim();
-      const match = text.match(/(\d{8,})/);
-      if (match) return match[1];
-    }
-
-    // Try plain text
-    const text = cell.textContent.trim();
-    const match = text.match(/(\d{8,})/);
-    return match ? match[1] : null;
+      container.appendChild(item);
+    });
   }
 
   // Fetch weight for a single batch
   async function fetchBatchWeight(batchId) {
-    log('='.repeat(40));
-    log(`FETCH BATCH WEIGHT: ${batchId}`);
-    log('='.repeat(40));
-
-    if (!connectionStatus.allConnected) {
-      const errorMsg = `Cannot fetch: Missing tabs - ${connectionStatus.missing.join(', ')}`;
-      logError(errorMsg);
-      addDebugLog(errorMsg);
-      updateStatus(errorMsg);
-      return;
-    }
+    log(`Fetching weight for batch: ${batchId}`);
 
     if (processingBatches.has(batchId)) {
-      log(`Batch ${batchId} is already being processed`);
+      log(`Batch ${batchId} already processing`);
       return;
     }
 
     processingBatches.add(batchId);
-    log(`Added ${batchId} to processing set. Current: ${[...processingBatches].join(', ')}`);
-
-    // Update UI to show loading
-    const cell = document.querySelector(`.pcs-weight-cell[data-batch-id="${batchId}"]`);
-    if (cell) {
-      cell.innerHTML = '<span class="pcs-loading">⏳</span>';
-    }
-
     updateStatus(`Fetching batch ${batchId}...`);
-    addDebugLog(`Fetching batch ${batchId}`);
+    scanForBatches(); // Update UI to show loading
 
     try {
-      log('Sending fetchBatchData message to background...');
       const result = await browser.runtime.sendMessage({
         type: 'fetchBatchData',
         batchId: batchId,
         warehouseId: CONFIG.warehouseId
       });
 
-      log('Received result from background:', JSON.stringify(result, null, 2));
-      addDebugLog(`Result: ${result.error || `${result.averageWeight} lbs avg`}`);
-
+      log('Result:', JSON.stringify(result, null, 2));
       batchResults.set(batchId, result);
-
-      if (cell) {
-        updateWeightCell(cell, result);
-      }
 
       if (result.error) {
         updateStatus(`Error: ${result.error}`);
-        logError('Fetch failed:', result.error);
       } else {
-        updateStatus(`Batch ${batchId}: ${result.averageWeight} lbs avg`);
-        log(`✓ Batch ${batchId} complete: ${result.averageWeight} lbs avg`);
+        updateStatus(`Batch ${batchId}: ${result.averageWeight} lbs avg (${result.totalItems} items)`);
       }
     } catch (error) {
-      logError('Exception during fetch:', error);
-      addDebugLog(`Error: ${error.message}`);
-
-      if (cell) {
-        cell.innerHTML = `<span class="pcs-error" title="${error.message}">❌</span>`;
-      }
-
+      logError('Fetch error:', error);
+      batchResults.set(batchId, { error: error.message });
       updateStatus(`Error: ${error.message}`);
     } finally {
       processingBatches.delete(batchId);
-      log(`Removed ${batchId} from processing set`);
+      scanForBatches(); // Update UI
     }
   }
 
-  // Update weight cell with result
-  function updateWeightCell(cell, result) {
-    log('Updating weight cell with result:', JSON.stringify(result, null, 2));
-
-    if (result.error) {
-      cell.innerHTML = `<span class="pcs-error" title="${result.error}">❌</span>`;
-      return;
-    }
-
-    const avgWeight = result.averageWeight;
-    const totalWeight = result.totalWeight;
-    const tooltip = `Total: ${totalWeight} lbs
-Items: ${result.totalItems}
-With Weight: ${result.itemsWithWeight}
-Min: ${result.minWeight} lbs
-Max: ${result.maxWeight} lbs
-Unique SKUs: ${result.uniqueSKUs}`;
-
-    // Color code based on weight
-    let colorClass = 'pcs-weight-normal';
-    if (avgWeight < 0.5) {
-      colorClass = 'pcs-weight-light';
-    } else if (avgWeight > 2) {
-      colorClass = 'pcs-weight-heavy';
-    }
-
-    cell.innerHTML = `
-      <span class="pcs-weight-value ${colorClass}" title="${tooltip}">
-        ${avgWeight.toFixed(2)}
-      </span>
-      <span class="pcs-weight-total">(${totalWeight.toFixed(1)} total)</span>
-    `;
-  }
-
-  // Fetch weights for all visible batches
+  // Fetch all batch weights
   async function fetchAllBatchWeights() {
-    log('='.repeat(40));
-    log('FETCH ALL BATCH WEIGHTS');
-    log('='.repeat(40));
+    const batchIds = scanForBatches();
+    const unfetched = batchIds.filter(id => !batchResults.has(id) && !processingBatches.has(id));
 
-    if (!connectionStatus.allConnected) {
-      const errorMsg = `Cannot fetch: Missing tabs - ${connectionStatus.missing.join(', ')}`;
-      logError(errorMsg);
-      updateStatus(errorMsg);
-      return;
-    }
-
-    const cells = document.querySelectorAll('.pcs-weight-cell');
-    const batchIds = [];
-
-    cells.forEach(cell => {
-      const batchId = cell.dataset.batchId;
-      if (batchId && !batchResults.has(batchId) && !processingBatches.has(batchId)) {
-        batchIds.push(batchId);
-      }
-    });
-
-    log(`Found ${batchIds.length} batches to fetch:`, batchIds);
-
-    if (batchIds.length === 0) {
+    if (unfetched.length === 0) {
       updateStatus('No new batches to fetch');
       return;
     }
 
-    updateStatus(`Fetching ${batchIds.length} batches...`);
-    addDebugLog(`Starting fetch of ${batchIds.length} batches`);
+    updateStatus(`Fetching ${unfetched.length} batches...`);
 
-    // Fetch sequentially to avoid overwhelming the tabs
-    for (let i = 0; i < batchIds.length; i++) {
-      const batchId = batchIds[i];
-      log(`Fetching batch ${i + 1}/${batchIds.length}: ${batchId}`);
-      updateStatus(`Fetching ${i + 1}/${batchIds.length}: ${batchId}`);
-      await fetchBatchWeight(batchId);
-
-      // Small delay between batches
-      if (i < batchIds.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
+    for (let i = 0; i < unfetched.length; i++) {
+      updateStatus(`Fetching ${i + 1}/${unfetched.length}: ${unfetched[i]}`);
+      await fetchBatchWeight(unfetched[i]);
     }
 
     updateStatus('All batches fetched');
-    addDebugLog('All batches fetched');
-    log('✓ All batches fetched');
   }
 
-  // Clear the weight cache
+  // Clear cache
   async function clearCache() {
     log('Clearing cache...');
-
-    try {
-      await browser.runtime.sendMessage({ type: 'clearCache' });
-      batchResults.clear();
-      log('Cache cleared');
-
-      // Reset all weight cells (click handler via event delegation)
-      document.querySelectorAll('.pcs-weight-cell').forEach(cell => {
-        const batchId = cell.dataset.batchId;
-        if (batchId) {
-          cell.innerHTML = `
-            <button class="pcs-fetch-btn" data-batch-id="${batchId}" title="Fetch weight" ${!connectionStatus.allConnected ? 'disabled' : ''}>
-              ⚖️
-            </button>
-          `;
-        }
-      });
-
-      updateStatus('Cache cleared');
-      document.getElementById('pcs-cache-count').textContent = '0';
-      addDebugLog('Cache cleared');
-    } catch (error) {
-      logError('Error clearing cache:', error);
-      updateStatus(`Error: ${error.message}`);
-    }
+    await browser.runtime.sendMessage({ type: 'clearCache' });
+    batchResults.clear();
+    scanForBatches();
+    updateStatus('Cache cleared');
   }
 
   // Update status display
@@ -635,24 +387,12 @@ Unique SKUs: ${result.uniqueSKUs}`;
     }
   }
 
-  // Initialize when ready
+  // Initialize
   if (document.readyState === 'loading') {
-    log('Document still loading, waiting for DOMContentLoaded...');
     document.addEventListener('DOMContentLoaded', init);
   } else {
-    log('Document ready, initializing immediately');
     init();
   }
-
-  // Re-enhance on navigation (SPA support)
-  let lastUrl = location.href;
-  new MutationObserver(() => {
-    if (location.href !== lastUrl) {
-      log(`URL changed: ${lastUrl} -> ${location.href}`);
-      lastUrl = location.href;
-      setTimeout(enhanceTable, 500);
-    }
-  }).observe(document, { subtree: true, childList: true });
 
   log('Content script setup complete');
 
