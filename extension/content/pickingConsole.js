@@ -27,7 +27,8 @@
   // Configuration
   const CONFIG = {
     warehouseId: extractWarehouseId(),
-    pollInterval: 2000
+    pollInterval: 2000,
+    autoFetchInterval: 15 * 60 * 1000 // 15 minutes in milliseconds
   };
 
   log('Configuration:', JSON.stringify(CONFIG, null, 2));
@@ -37,6 +38,9 @@
   let processingBatches = new Set();
   let batchResults = new Map();
   let batchDataFromAPI = [];
+  let autoFetchIntervalId = null;
+  let countdownIntervalId = null;
+  let nextAutoFetchTime = null;
 
   // Extract warehouse ID from URL (e.g., IND8 from /fc/IND8/)
   function extractWarehouseId() {
@@ -76,8 +80,11 @@
     // Observe for dynamic content changes
     observeContent();
 
-    // Initial fetch from API
-    setTimeout(fetchBatchesFromAPI, 1000);
+    // Initial fetch from API and start auto-fetch timer
+    setTimeout(async () => {
+      await fetchBatchesFromAPI();
+      startAutoFetchTimer();
+    }, 1000);
 
     isInitialized = true;
     log('Initialization complete');
@@ -194,9 +201,15 @@
             <span class="pcs-stat-value" id="pcs-batches-count">0</span>
           </div>
         </div>
+        <div class="pcs-auto-fetch">
+          <div class="pcs-countdown">
+            <span class="pcs-countdown-label">Next auto-fetch:</span>
+            <span class="pcs-countdown-value" id="pcs-countdown">--:--</span>
+          </div>
+        </div>
         <div class="pcs-actions">
-          <button id="pcs-refresh" class="pcs-btn pcs-btn-primary">Refresh Batches</button>
-          <button id="pcs-fetch-all" class="pcs-btn">Fetch All Weights</button>
+          <button id="pcs-fetch-now" class="pcs-btn pcs-btn-primary" title="Fetch all weights now and reset timer">Fetch All Now</button>
+          <button id="pcs-refresh" class="pcs-btn" title="Refresh batch list only">Refresh List</button>
           <button id="pcs-clear-cache" class="pcs-btn">Clear Cache</button>
         </div>
         <div class="pcs-batch-list" id="pcs-batch-list">
@@ -213,14 +226,14 @@
       panel.classList.toggle('pcs-minimized');
     });
 
-    panel.querySelector('#pcs-refresh').addEventListener('click', () => {
-      log('Refresh button clicked');
-      fetchBatchesFromAPI();
+    panel.querySelector('#pcs-fetch-now').addEventListener('click', () => {
+      log('Fetch Now button clicked');
+      fetchAllAndResetTimer();
     });
 
-    panel.querySelector('#pcs-fetch-all').addEventListener('click', () => {
-      log('Fetch All button clicked');
-      fetchAllBatchWeights();
+    panel.querySelector('#pcs-refresh').addEventListener('click', () => {
+      log('Refresh List button clicked');
+      fetchBatchesFromAPI();
     });
 
     panel.querySelector('#pcs-clear-cache').addEventListener('click', () => {
@@ -439,6 +452,71 @@
     }
 
     updateStatus('All batches fetched');
+  }
+
+  // Fetch all weights and reset the auto-fetch timer
+  async function fetchAllAndResetTimer() {
+    log('Fetching all weights and resetting timer...');
+
+    // Clear existing results to fetch fresh data
+    batchResults.clear();
+
+    // Refresh batch list first
+    await fetchBatchesFromAPI();
+
+    // Fetch all weights
+    await fetchAllBatchWeights();
+
+    // Reset the auto-fetch timer
+    startAutoFetchTimer();
+
+    log('Fetch complete, timer reset');
+  }
+
+  // Start the auto-fetch timer
+  function startAutoFetchTimer() {
+    // Clear existing timers
+    if (autoFetchIntervalId) {
+      clearInterval(autoFetchIntervalId);
+    }
+    if (countdownIntervalId) {
+      clearInterval(countdownIntervalId);
+    }
+
+    // Set next auto-fetch time
+    nextAutoFetchTime = Date.now() + CONFIG.autoFetchInterval;
+    log(`Auto-fetch scheduled for: ${new Date(nextAutoFetchTime).toLocaleTimeString()}`);
+
+    // Start countdown update
+    countdownIntervalId = setInterval(updateCountdown, 1000);
+    updateCountdown(); // Update immediately
+
+    // Set auto-fetch interval
+    autoFetchIntervalId = setInterval(async () => {
+      log('Auto-fetch triggered');
+      updateStatus('Auto-fetching all batches...');
+
+      // Clear old results and fetch fresh
+      batchResults.clear();
+      await fetchBatchesFromAPI();
+      await fetchAllBatchWeights();
+
+      // Reset timer for next cycle
+      nextAutoFetchTime = Date.now() + CONFIG.autoFetchInterval;
+      log(`Next auto-fetch at: ${new Date(nextAutoFetchTime).toLocaleTimeString()}`);
+    }, CONFIG.autoFetchInterval);
+  }
+
+  // Update the countdown display
+  function updateCountdown() {
+    const countdownEl = document.getElementById('pcs-countdown');
+    if (!countdownEl || !nextAutoFetchTime) return;
+
+    const remaining = Math.max(0, nextAutoFetchTime - Date.now());
+    const minutes = Math.floor(remaining / 60000);
+    const seconds = Math.floor((remaining % 60000) / 1000);
+
+    countdownEl.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   }
 
   // Clear cache
