@@ -41,6 +41,10 @@
   let autoFetchIntervalId = null;
   let countdownIntervalId = null;
   let nextAutoFetchTime = null;
+  let currentFilters = {
+    state: 'Ready',
+    pickProcess: null
+  };
 
   // Extract warehouse ID from URL (e.g., IND8 from /fc/IND8/)
   function extractWarehouseId() {
@@ -48,6 +52,205 @@
     const warehouseId = match ? match[1] : 'IND8';
     log('Extracted warehouse ID:', warehouseId);
     return warehouseId;
+  }
+
+  // Detect current batch state from page (Ready, Active, etc.)
+  function detectCurrentState() {
+    // Method 1: Look for dropdown/select with state value
+    const stateDropdown = document.querySelector('select, [role="listbox"], [class*="dropdown"]');
+    if (stateDropdown) {
+      const selectedOption = stateDropdown.querySelector('[aria-selected="true"], option:checked, [class*="selected"]');
+      if (selectedOption) {
+        const text = selectedOption.textContent.trim();
+        if (['Ready', 'Active', 'InProgress', 'Completed', 'All'].some(s => text.includes(s))) {
+          return text;
+        }
+      }
+    }
+
+    // Method 2: Look for state in the page heading or info text
+    const pageText = document.body.innerText;
+    const stateMatch = pageText.match(/Found \d+ batches in (\w+) state/i);
+    if (stateMatch) {
+      return stateMatch[1];
+    }
+
+    // Method 3: Check URL for state parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const stateFromUrl = urlParams.get('state') || urlParams.get('batchState');
+    if (stateFromUrl) {
+      return stateFromUrl;
+    }
+
+    // Default to Ready
+    return 'Ready';
+  }
+
+  // Detect current Pick Process filter from filter chips
+  function detectPickProcessFilter() {
+    // Look for filter chips/tokens that indicate pick process
+    const filterChips = document.querySelectorAll('[class*="token"], [class*="chip"], [class*="filter"], [class*="tag"]');
+
+    for (const chip of filterChips) {
+      const text = chip.textContent.trim();
+
+      // Check for FracsLTLPicking or MultiSlamPicking
+      if (text.includes('FracsLTLPicking') || text.includes('FLTL') || text.includes('LTL')) {
+        return 'FracsLTLPicking';
+      }
+      if (text.includes('MultiSlamPicking') || text.includes('Multi') || text.includes('MSP')) {
+        return 'MultiSlamPicking';
+      }
+
+      // Generic pick process detection
+      if (text.includes('Pick Process:')) {
+        const processMatch = text.match(/Pick Process:\s*(\w+)/);
+        if (processMatch) {
+          return processMatch[1];
+        }
+      }
+    }
+
+    // Check URL for tableFilters parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const tableFilters = urlParams.get('tableFilters');
+    if (tableFilters) {
+      try {
+        const filters = JSON.parse(decodeURIComponent(tableFilters));
+        if (filters.tokens) {
+          for (const token of filters.tokens) {
+            if (token.propertyKey === 'pickProcess' && token.value) {
+              return token.value;
+            }
+          }
+        }
+      } catch (e) {
+        log('Error parsing tableFilters:', e);
+      }
+    }
+
+    return null; // No specific filter
+  }
+
+  // Get visible batch IDs from the table on screen
+  function getVisibleBatchIds() {
+    const batchIds = [];
+
+    // Find all table rows with batch IDs
+    const rows = document.querySelectorAll('tr, [role="row"]');
+    for (const row of rows) {
+      // Look for batch ID link in the row (8+ digit number)
+      const links = row.querySelectorAll('a');
+      for (const link of links) {
+        const text = link.textContent.trim();
+        if (/^\d{8,}$/.test(text)) {
+          batchIds.push(text);
+          break; // Only one batch ID per row
+        }
+      }
+    }
+
+    return batchIds;
+  }
+
+  // Inject weight display into table rows
+  function injectWeightsIntoTable() {
+    log('Injecting weights into table...');
+
+    // Find all table rows
+    const rows = document.querySelectorAll('tr, [role="row"]');
+
+    for (const row of rows) {
+      // Find batch ID in this row
+      let batchId = null;
+      const links = row.querySelectorAll('a');
+      for (const link of links) {
+        const text = link.textContent.trim();
+        if (/^\d{8,}$/.test(text)) {
+          batchId = text;
+          break;
+        }
+      }
+
+      if (!batchId) continue;
+
+      // Check if we already injected weight for this row
+      if (row.querySelector('.pcs-inline-weight')) {
+        // Update existing weight display
+        const existingWeight = row.querySelector('.pcs-inline-weight');
+        const result = batchResults.get(batchId);
+        if (result && !result.error) {
+          existingWeight.textContent = `${result.averageWeight} lbs`;
+          existingWeight.title = `Total: ${result.totalWeight} lbs (${result.totalItems} items)`;
+          existingWeight.classList.remove('pcs-loading');
+        } else if (processingBatches.has(batchId)) {
+          existingWeight.textContent = '...';
+          existingWeight.classList.add('pcs-loading');
+        }
+        continue;
+      }
+
+      // Find the Units cell to inject after
+      const cells = row.querySelectorAll('td, [role="cell"], [role="gridcell"]');
+      let unitsCell = null;
+
+      for (const cell of cells) {
+        // Find cell with unit count (number in a badge or just a number)
+        const badge = cell.querySelector('[class*="badge"], [class*="pill"]');
+        if (badge) {
+          const text = badge.textContent.trim();
+          if (/^\d+$/.test(text)) {
+            unitsCell = cell;
+            break;
+          }
+        }
+      }
+
+      // If no badge found, look for the 6th cell (Units column based on screenshot)
+      if (!unitsCell && cells.length >= 6) {
+        unitsCell = cells[5]; // 0-indexed, so 5 is the 6th column
+      }
+
+      if (unitsCell) {
+        // Create weight badge
+        const weightBadge = document.createElement('span');
+        weightBadge.className = 'pcs-inline-weight';
+
+        const result = batchResults.get(batchId);
+        if (result && !result.error) {
+          weightBadge.textContent = `${result.averageWeight} lbs`;
+          weightBadge.title = `Total: ${result.totalWeight} lbs (${result.totalItems} items)`;
+        } else if (processingBatches.has(batchId)) {
+          weightBadge.textContent = '...';
+          weightBadge.classList.add('pcs-loading');
+        } else {
+          weightBadge.textContent = '—';
+          weightBadge.title = 'Weight not fetched yet';
+        }
+
+        // Inject after the units cell content
+        unitsCell.appendChild(weightBadge);
+      }
+    }
+  }
+
+  // Update filters display in panel
+  function updateFiltersDisplay() {
+    currentFilters.state = detectCurrentState();
+    currentFilters.pickProcess = detectPickProcessFilter();
+
+    log('Current filters:', currentFilters);
+
+    // Update panel display
+    const stateEl = document.getElementById('pcs-current-state');
+    const processEl = document.getElementById('pcs-current-process');
+
+    if (stateEl) {
+      stateEl.textContent = currentFilters.state || 'All';
+    }
+    if (processEl) {
+      processEl.textContent = currentFilters.pickProcess || 'All';
+    }
   }
 
   // Notify background script that we're ready
@@ -117,38 +320,50 @@
     log('Fetching batches from API...');
     updateStatus('Fetching batches from API...');
 
+    // First, detect current filters
+    updateFiltersDisplay();
+
     try {
-      // Try different status endpoints
-      const statuses = ['Ready', 'InProgress', 'All'];
+      // Only fetch the current state (not all states)
+      const stateToFetch = currentFilters.state || 'Ready';
+      const url = `https://picking-console.na.picking.aft.a2z.com/api/fcs/${CONFIG.warehouseId}/batch-info/${stateToFetch}`;
+      log(`Fetching: ${url}`);
+
       let allBatches = [];
 
-      for (const status of statuses) {
-        const url = `https://picking-console.na.picking.aft.a2z.com/api/fcs/${CONFIG.warehouseId}/batch-info/${status}`;
-        log(`Fetching: ${url}`);
-
-        try {
-          const response = await fetch(url, {
-            method: 'GET',
-            credentials: 'include',
-            headers: {
-              'Accept': 'application/json'
-            }
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            log(`API response for ${status}:`, data);
-
-            if (data.pickBatchInformationList && Array.isArray(data.pickBatchInformationList)) {
-              allBatches = allBatches.concat(data.pickBatchInformationList);
-              log(`Found ${data.pickBatchInformationList.length} batches in ${status}`);
-            }
-          } else {
-            log(`API request failed for ${status}: ${response.status}`);
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          credentials: 'include',
+          headers: {
+            'Accept': 'application/json'
           }
-        } catch (err) {
-          log(`API request error for ${status}:`, err.message);
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          log(`API response for ${stateToFetch}:`, data);
+
+          if (data.pickBatchInformationList && Array.isArray(data.pickBatchInformationList)) {
+            allBatches = data.pickBatchInformationList;
+            log(`Found ${allBatches.length} batches in ${stateToFetch}`);
+          }
+        } else {
+          log(`API request failed for ${stateToFetch}: ${response.status}`);
         }
+      } catch (err) {
+        log(`API request error for ${stateToFetch}:`, err.message);
+      }
+
+      // Filter by Pick Process if a filter is active
+      if (currentFilters.pickProcess) {
+        const filteredBatches = allBatches.filter(batch => {
+          // Check if batch has pickProcess field matching the filter
+          return batch.pickProcess === currentFilters.pickProcess ||
+                 batch.pickProcessType === currentFilters.pickProcess;
+        });
+        log(`Filtered to ${filteredBatches.length} batches with pickProcess=${currentFilters.pickProcess}`);
+        allBatches = filteredBatches;
       }
 
       // Deduplicate by batchId
@@ -162,18 +377,22 @@
       }
 
       batchDataFromAPI = uniqueBatches;
-      log(`Total unique batches from API: ${batchDataFromAPI.length}`);
+      log(`Total unique batches: ${batchDataFromAPI.length}`);
 
       // Update UI
-      updateBatchList(batchDataFromAPI.map(b => b.batchId));
+      const batchIds = batchDataFromAPI.map(b => b.batchId);
+      updateBatchList(batchIds);
       document.getElementById('pcs-batches-count').textContent = batchDataFromAPI.length;
-      updateStatus(`Found ${batchDataFromAPI.length} batches from API`);
+      updateStatus(`Found ${batchDataFromAPI.length} ${currentFilters.pickProcess || ''} batches in ${stateToFetch}`);
+
+      // Also inject weights into table
+      injectWeightsIntoTable();
 
       return batchDataFromAPI;
     } catch (error) {
       logError('API fetch error:', error);
       updateStatus(`API error: ${error.message}. Falling back to page scan.`);
-      // Fallback to scanning the page
+      // Fallback to scanning visible batches on page
       return scanForBatches();
     }
   }
@@ -197,7 +416,15 @@
             <span class="pcs-stat-value">${CONFIG.warehouseId}</span>
           </div>
           <div class="pcs-stat">
-            <span class="pcs-stat-label">Batches Found:</span>
+            <span class="pcs-stat-label">State:</span>
+            <span class="pcs-stat-value" id="pcs-current-state">—</span>
+          </div>
+          <div class="pcs-stat">
+            <span class="pcs-stat-label">Pick Process:</span>
+            <span class="pcs-stat-value" id="pcs-current-process">—</span>
+          </div>
+          <div class="pcs-stat">
+            <span class="pcs-stat-label">Batches:</span>
             <span class="pcs-stat-value" id="pcs-batches-count">0</span>
           </div>
         </div>
@@ -278,15 +505,23 @@
     log('Setting up content observer...');
 
     const observer = new MutationObserver((mutations) => {
-      // Debounce re-scanning
+      // Debounce actions
       clearTimeout(observeContent.timeout);
       observeContent.timeout = setTimeout(() => {
-        // Only re-fetch if we don't have data yet
-        if (batchDataFromAPI.length === 0) {
-          log('Content changed, re-fetching...');
+        // Check if filters changed
+        const newState = detectCurrentState();
+        const newProcess = detectPickProcessFilter();
+
+        if (newState !== currentFilters.state || newProcess !== currentFilters.pickProcess) {
+          log('Filters changed, re-fetching...');
+          currentFilters.state = newState;
+          currentFilters.pickProcess = newProcess;
           fetchBatchesFromAPI();
+        } else {
+          // Just re-inject weights into table (table may have re-rendered)
+          injectWeightsIntoTable();
         }
-      }, 2000);
+      }, 500);
     });
 
     observer.observe(document.body, {
@@ -431,6 +666,8 @@
     } finally {
       processingBatches.delete(batchId);
       updateBatchList(batchDataFromAPI.length > 0 ? batchDataFromAPI.map(b => b.batchId) : scanForBatches());
+      // Update inline weights in table
+      injectWeightsIntoTable();
     }
   }
 
