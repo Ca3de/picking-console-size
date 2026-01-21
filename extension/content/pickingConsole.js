@@ -138,6 +138,9 @@
 
     log('Initializing...');
 
+    // Set up global click handler FIRST (event delegation)
+    setupClickHandler();
+
     // Create floating panel
     createFloatingPanel();
 
@@ -298,6 +301,32 @@
     log('Table observer active');
   }
 
+  // Set up event delegation for fetch button clicks (only once)
+  let clickHandlerAttached = false;
+  function setupClickHandler() {
+    if (clickHandlerAttached) return;
+    clickHandlerAttached = true;
+
+    log('Setting up global click handler for fetch buttons...');
+
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.pcs-fetch-btn');
+      if (btn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const batchId = btn.dataset.batchId;
+        log(`Fetch button clicked for batch: ${batchId}`);
+        if (btn.disabled) {
+          log('Button is disabled, ignoring click');
+          return;
+        }
+        fetchBatchWeight(batchId);
+      }
+    });
+
+    log('Global click handler attached');
+  }
+
   // Enhance the batch table with weight column
   function enhanceTable() {
     log('Enhancing table...');
@@ -390,16 +419,7 @@
       document.getElementById('pcs-batches-count').textContent = batchCount;
       log(`Total batches found: ${batchCount}`);
 
-      // Add click handlers for fetch buttons
-      table.querySelectorAll('.pcs-fetch-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const batchId = btn.dataset.batchId;
-          log(`Fetch button clicked for batch: ${batchId}`);
-          fetchBatchWeight(batchId);
-        });
-      });
+      // Click handlers are set up via event delegation in setupClickHandler()
     }
 
     log('Table enhancement complete');
@@ -585,7 +605,7 @@ Unique SKUs: ${result.uniqueSKUs}`;
       batchResults.clear();
       log('Cache cleared');
 
-      // Reset all weight cells
+      // Reset all weight cells (click handler via event delegation)
       document.querySelectorAll('.pcs-weight-cell').forEach(cell => {
         const batchId = cell.dataset.batchId;
         if (batchId) {
@@ -594,11 +614,6 @@ Unique SKUs: ${result.uniqueSKUs}`;
               ⚖️
             </button>
           `;
-          cell.querySelector('.pcs-fetch-btn').addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            fetchBatchWeight(batchId);
-          });
         }
       });
 
