@@ -170,82 +170,123 @@ async function handleFetchBatchData(batchId, warehouseId) {
 
 // Fetch FN SKUs from Rodeo via direct HTTP request
 async function fetchFNSKUsFromRodeo(batchId, warehouseId) {
-  const url = `https://rodeo-iad.amazon.com/${warehouseId}/Search?_enabledColumns=on&enabledColumns=LPN&searchKey=${batchId}`;
+  // Try multiple URL patterns for Rodeo
+  const urls = [
+    `https://rodeo-iad.amazon.com/${warehouseId}/Search?_enabledColumns=on&enabledColumns=LPN&searchKey=${batchId}`,
+    `https://rodeo-iad.amazon.com/${warehouseId}/Search?searchKey=${batchId}`,
+    `https://rodeo-dub.amazon.com/${warehouseId}/Search?searchKey=${batchId}`,
+    `https://rodeo.amazon.com/${warehouseId}/Search?searchKey=${batchId}`
+  ];
 
-  log(`Fetching Rodeo URL: ${url}`);
+  for (const url of urls) {
+    log(`Trying Rodeo URL: ${url}`);
 
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      credentials: 'include', // Include cookies for authentication
-      headers: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5'
+        }
+      });
+
+      log(`Rodeo response status: ${response.status}`);
+
+      if (!response.ok) {
+        log(`Request failed, trying next URL...`);
+        continue;
       }
-    });
 
-    log(`Rodeo response status: ${response.status}`);
+      const html = await response.text();
+      log(`Rodeo response length: ${html.length} chars`);
 
-    if (!response.ok) {
-      throw new Error(`Rodeo request failed: ${response.status} ${response.statusText}`);
+      // Check if we got a valid response (not a redirect or error page)
+      if (html.includes('Sign in') || html.includes('Login') || html.length < 500) {
+        log('Got login page or error, trying next URL...');
+        continue;
+      }
+
+      // Parse HTML to extract FN SKUs
+      const fnskus = parseRodeoFNSKUs(html);
+      log(`Parsed ${fnskus.length} FN SKUs from Rodeo response`);
+
+      if (fnskus.length > 0) {
+        return { fnskus };
+      }
+    } catch (error) {
+      logError(`Rodeo fetch error for ${url}:`, error);
     }
-
-    const html = await response.text();
-    log(`Rodeo response length: ${html.length} chars`);
-
-    // Parse HTML to extract FN SKUs
-    const fnskus = parseRodeoFNSKUs(html);
-    log(`Parsed ${fnskus.length} FN SKUs from Rodeo response`);
-
-    return { fnskus };
-  } catch (error) {
-    logError('Rodeo fetch error:', error);
-    return { error: error.message, fnskus: [] };
   }
+
+  return { error: 'Could not fetch data from Rodeo', fnskus: [] };
 }
 
 // Parse Rodeo HTML to extract FN SKUs
 function parseRodeoFNSKUs(html) {
   const fnskus = [];
+  const seen = new Set();
 
   log('Parsing Rodeo HTML for FN SKUs...');
 
   // Method 1: Look for FN SKU links (they link to fcresearch)
-  // Pattern: <a href="...fcresearch...">X004UIFIPL</a>
+  // Pattern: <a href="...fcresearch...*">X004UIFIPL</a>
   const linkPattern = /<a[^>]*href="[^"]*fcresearch[^"]*"[^>]*>([A-Z0-9]{10,})<\/a>/gi;
   let match;
   while ((match = linkPattern.exec(html)) !== null) {
-    fnskus.push(match[1]);
+    if (!seen.has(match[1])) {
+      seen.add(match[1]);
+      fnskus.push(match[1]);
+    }
   }
   log(`Method 1 (fcresearch links): found ${fnskus.length} FN SKUs`);
 
-  // Method 2: If no results, try table cell pattern
+  // Method 2: Look for FN SKU in any links
   if (fnskus.length === 0) {
-    // Look for FN SKU pattern in table cells: <td>X004UIFIPL</td> or <td><a>X004UIFIPL</a></td>
-    const cellPattern = /<td[^>]*>(?:<a[^>]*>)?([XB][A-Z0-9]{9,})(?:<\/a>)?<\/td>/gi;
-    while ((match = cellPattern.exec(html)) !== null) {
-      fnskus.push(match[1]);
+    const anyLinkPattern = /<a[^>]*>([XB][A-Z0-9]{9,})<\/a>/gi;
+    while ((match = anyLinkPattern.exec(html)) !== null) {
+      if (!seen.has(match[1])) {
+        seen.add(match[1]);
+        fnskus.push(match[1]);
+      }
     }
-    log(`Method 2 (table cells): found ${fnskus.length} FN SKUs`);
+    log(`Method 2 (any links): found ${fnskus.length} FN SKUs`);
   }
 
-  // Method 3: Broader regex search
+  // Method 3: Look for FN SKU pattern in table cells
+  if (fnskus.length === 0) {
+    const cellPattern = /<td[^>]*>(?:<[^>]*>)*([XB][A-Z0-9]{9,})(?:<[^>]*>)*<\/td>/gi;
+    while ((match = cellPattern.exec(html)) !== null) {
+      if (!seen.has(match[1])) {
+        seen.add(match[1]);
+        fnskus.push(match[1]);
+      }
+    }
+    log(`Method 3 (table cells): found ${fnskus.length} FN SKUs`);
+  }
+
+  // Method 4: Broader regex search for FN SKU pattern
   if (fnskus.length === 0) {
     const broadPattern = /\b([XB][A-Z0-9]{9,})\b/g;
-    const seen = new Set();
     while ((match = broadPattern.exec(html)) !== null) {
       if (!seen.has(match[1])) {
         seen.add(match[1]);
         fnskus.push(match[1]);
       }
     }
-    log(`Method 3 (broad regex): found ${fnskus.length} FN SKUs`);
+    log(`Method 4 (broad regex): found ${fnskus.length} FN SKUs`);
   }
 
   // Log sample of HTML for debugging if no FN SKUs found
   if (fnskus.length === 0) {
-    log('No FN SKUs found. HTML sample (first 2000 chars):');
-    log(html.substring(0, 2000));
+    log('No FN SKUs found. HTML sample (first 3000 chars):');
+    log(html.substring(0, 3000));
+    log('---');
+    log('HTML sample (around "FN" or "SKU" if present):');
+    const fnIndex = html.toLowerCase().indexOf('fn');
+    if (fnIndex > -1) {
+      log(html.substring(Math.max(0, fnIndex - 100), fnIndex + 500));
+    }
   }
 
   return fnskus;
@@ -261,83 +302,103 @@ async function fetchWeightFromFCResearch(fnsku, warehouseId) {
     return { fnsku, weight: cached.weight, fromCache: true };
   }
 
-  const url = `https://fcresearch-na.aka.amazon.com/${warehouseId}/results?s=${fnsku}`;
+  // Try multiple URL patterns for FC Research
+  const urls = [
+    `https://fcresearch-na.aka.amazon.com/${warehouseId}/results?s=${fnsku}`,
+    `https://fcresearch-na.aka.amazon.com/results?s=${fnsku}&fc=${warehouseId}`,
+    `https://fcresearch.aka.amazon.com/${warehouseId}/results?s=${fnsku}`
+  ];
 
-  log(`Fetching FC Research URL: ${url}`);
+  for (const url of urls) {
+    log(`Trying FC Research URL: ${url}`);
 
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      credentials: 'include', // Include cookies for authentication
-      headers: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5'
+        }
+      });
+
+      log(`FC Research response status for ${fnsku}: ${response.status}`);
+
+      if (!response.ok) {
+        log(`Request failed, trying next URL...`);
+        continue;
       }
-    });
 
-    log(`FC Research response status for ${fnsku}: ${response.status}`);
+      const html = await response.text();
+      log(`FC Research response length for ${fnsku}: ${html.length} chars`);
 
-    if (!response.ok) {
-      throw new Error(`FC Research request failed: ${response.status}`);
+      // Check if we got a valid response
+      if (html.includes('Sign in') || html.includes('Login') || html.length < 500) {
+        log('Got login page or error, trying next URL...');
+        continue;
+      }
+
+      // Parse HTML to extract weight
+      const weight = parseFCResearchWeight(html, fnsku);
+
+      if (weight !== null) {
+        // Cache the result
+        weightCache.set(cacheKey, { weight, timestamp: Date.now() });
+        log(`Cached weight for ${fnsku}: ${weight} lbs`);
+        return { fnsku, weight };
+      }
+    } catch (error) {
+      logError(`FC Research fetch error for ${fnsku}:`, error);
     }
-
-    const html = await response.text();
-    log(`FC Research response length for ${fnsku}: ${html.length} chars`);
-
-    // Parse HTML to extract weight
-    const weight = parseFCResearchWeight(html, fnsku);
-
-    // Cache the result
-    if (weight !== null) {
-      weightCache.set(cacheKey, { weight, timestamp: Date.now() });
-      log(`Cached weight for ${fnsku}: ${weight} lbs`);
-    }
-
-    return { fnsku, weight };
-  } catch (error) {
-    logError(`FC Research fetch error for ${fnsku}:`, error);
-    return { fnsku, weight: null, error: error.message };
   }
+
+  return { fnsku, weight: null, error: 'Could not fetch weight' };
 }
 
 // Parse FC Research HTML to extract weight in pounds
 function parseFCResearchWeight(html, fnsku) {
   log(`Parsing FC Research HTML for weight (${fnsku})...`);
 
-  // Method 1: Look for Weight row in table
+  // Method 1: Look for Weight row in table with various formats
   // Pattern: <td>Weight</td><td>0.79 pounds</td>
-  const weightRowPattern = /<t[dh][^>]*>\s*Weight\s*<\/t[dh]>\s*<td[^>]*>\s*([\d.]+)\s*(?:pounds?|lbs?)/i;
-  let match = html.match(weightRowPattern);
-  if (match) {
-    const weight = parseFloat(match[1]);
-    log(`Method 1 (table row): found weight ${weight} lbs`);
-    return weight;
+  const patterns = [
+    /<t[dh][^>]*>\s*Weight\s*<\/t[dh]>\s*<td[^>]*>\s*([\d.]+)\s*(?:pounds?|lbs?|lb)/i,
+    /<t[dh][^>]*>Weight<\/t[dh]>\s*<td[^>]*>([\d.]+)/i,
+    /Weight[:\s]*<[^>]*>([\d.]+)\s*(?:pounds?|lbs?|lb)/i,
+    /Weight[:\s]*([\d.]+)\s*(?:pounds?|lbs?|lb)/i,
+    /"weight"[:\s]*([\d.]+)/i,
+    /weight["\s:]+(\d+\.?\d*)/i
+  ];
+
+  for (let i = 0; i < patterns.length; i++) {
+    const match = html.match(patterns[i]);
+    if (match) {
+      const weight = parseFloat(match[1]);
+      if (!isNaN(weight) && weight > 0 && weight < 1000) {
+        log(`Method ${i + 1}: found weight ${weight} lbs`);
+        return weight;
+      }
+    }
   }
 
-  // Method 2: Look for weight with any separator
-  const weightPattern = /Weight[:\s<>\/tdh]*?([\d.]+)\s*(?:pounds?|lbs?)/i;
-  match = html.match(weightPattern);
-  if (match) {
+  // Method: Look for pounds anywhere near numbers
+  const poundsPattern = /(\d+\.?\d*)\s*(?:pounds?|lbs?|lb)\b/gi;
+  let match;
+  while ((match = poundsPattern.exec(html)) !== null) {
     const weight = parseFloat(match[1]);
-    log(`Method 2 (generic): found weight ${weight} lbs`);
-    return weight;
-  }
-
-  // Method 3: Look in structured data or JSON
-  const jsonPattern = /"weight"[:\s]*([\d.]+)/i;
-  match = html.match(jsonPattern);
-  if (match) {
-    const weight = parseFloat(match[1]);
-    log(`Method 3 (JSON): found weight ${weight} lbs`);
-    return weight;
+    if (!isNaN(weight) && weight > 0 && weight < 100) {
+      log(`Pounds pattern: found weight ${weight} lbs`);
+      return weight;
+    }
   }
 
   log(`No weight found for ${fnsku}`);
 
   // Log sample for debugging
-  if (html.includes('Weight')) {
-    const idx = html.indexOf('Weight');
-    log(`HTML around 'Weight' keyword: ...${html.substring(Math.max(0, idx - 50), idx + 150)}...`);
+  if (html.toLowerCase().includes('weight')) {
+    const idx = html.toLowerCase().indexOf('weight');
+    log(`HTML around 'weight' keyword:`);
+    log(html.substring(Math.max(0, idx - 50), idx + 200));
   }
 
   return null;
@@ -346,7 +407,7 @@ function parseFCResearchWeight(html, fnsku) {
 // Update extension badge
 function updateBadge(connected) {
   if (connected) {
-    browser.browserAction.setBadgeText({ text: '✓' });
+    browser.browserAction.setBadgeText({ text: 'OK' });
     browser.browserAction.setBadgeBackgroundColor({ color: '#4CAF50' });
   } else {
     browser.browserAction.setBadgeText({ text: '' });
