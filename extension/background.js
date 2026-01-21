@@ -222,33 +222,27 @@ async function fetchFNSKUsFromRodeo(batchId, warehouseId) {
   return { error: 'Could not fetch data from Rodeo', fnskus: [] };
 }
 
-// Parse Rodeo HTML to extract FN SKUs
+// Parse Rodeo HTML to extract FN SKUs (including duplicates for accurate unit count)
 function parseRodeoFNSKUs(html) {
   const fnskus = [];
-  const seen = new Set();
 
   log('Parsing Rodeo HTML for FN SKUs...');
 
   // Method 1: Look for FN SKU links (they link to fcresearch)
+  // Keep ALL matches including duplicates to count total units
   // Pattern: <a href="...fcresearch...*">X004UIFIPL</a>
   const linkPattern = /<a[^>]*href="[^"]*fcresearch[^"]*"[^>]*>([A-Z0-9]{10,})<\/a>/gi;
   let match;
   while ((match = linkPattern.exec(html)) !== null) {
-    if (!seen.has(match[1])) {
-      seen.add(match[1]);
-      fnskus.push(match[1]);
-    }
+    fnskus.push(match[1]);
   }
-  log(`Method 1 (fcresearch links): found ${fnskus.length} FN SKUs`);
+  log(`Method 1 (fcresearch links): found ${fnskus.length} FN SKUs (including duplicates)`);
 
-  // Method 2: Look for FN SKU in any links
+  // Method 2: Look for FN SKU in any links (only if method 1 found nothing)
   if (fnskus.length === 0) {
     const anyLinkPattern = /<a[^>]*>([XB][A-Z0-9]{9,})<\/a>/gi;
     while ((match = anyLinkPattern.exec(html)) !== null) {
-      if (!seen.has(match[1])) {
-        seen.add(match[1]);
-        fnskus.push(match[1]);
-      }
+      fnskus.push(match[1]);
     }
     log(`Method 2 (any links): found ${fnskus.length} FN SKUs`);
   }
@@ -257,10 +251,7 @@ function parseRodeoFNSKUs(html) {
   if (fnskus.length === 0) {
     const cellPattern = /<td[^>]*>(?:<[^>]*>)*([XB][A-Z0-9]{9,})(?:<[^>]*>)*<\/td>/gi;
     while ((match = cellPattern.exec(html)) !== null) {
-      if (!seen.has(match[1])) {
-        seen.add(match[1]);
-        fnskus.push(match[1]);
-      }
+      fnskus.push(match[1]);
     }
     log(`Method 3 (table cells): found ${fnskus.length} FN SKUs`);
   }
@@ -269,10 +260,7 @@ function parseRodeoFNSKUs(html) {
   if (fnskus.length === 0) {
     const broadPattern = /\b([XB][A-Z0-9]{9,})\b/g;
     while ((match = broadPattern.exec(html)) !== null) {
-      if (!seen.has(match[1])) {
-        seen.add(match[1]);
-        fnskus.push(match[1]);
-      }
+      fnskus.push(match[1]);
     }
     log(`Method 4 (broad regex): found ${fnskus.length} FN SKUs`);
   }
@@ -288,6 +276,9 @@ function parseRodeoFNSKUs(html) {
       log(html.substring(Math.max(0, fnIndex - 100), fnIndex + 500));
     }
   }
+
+  const uniqueCount = new Set(fnskus).size;
+  log(`Total: ${fnskus.length} units, ${uniqueCount} unique SKUs`);
 
   return fnskus;
 }
