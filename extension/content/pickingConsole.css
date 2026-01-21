@@ -205,6 +205,104 @@
   margin-top: 2px;
 }
 
+/* Connection Status */
+.pcs-connection-status {
+  margin-bottom: 12px;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.pcs-status-ok {
+  background: rgba(76, 175, 80, 0.2);
+  border: 1px solid rgba(76, 175, 80, 0.4);
+}
+
+.pcs-status-warning {
+  background: rgba(255, 152, 0, 0.2);
+  border: 1px solid rgba(255, 152, 0, 0.4);
+}
+
+.pcs-connected {
+  color: #4CAF50;
+  font-weight: 600;
+}
+
+.pcs-disconnected {
+  color: #FF9800;
+  font-weight: 600;
+}
+
+.pcs-tab-links {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.pcs-tab-links a {
+  color: #667eea;
+  text-decoration: none;
+  padding: 4px 8px;
+  background: rgba(102, 126, 234, 0.2);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.pcs-tab-links a:hover {
+  background: rgba(102, 126, 234, 0.3);
+  text-decoration: underline;
+}
+
+/* Debug Section */
+.pcs-debug {
+  margin-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 12px;
+}
+
+.pcs-debug summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: #888;
+  user-select: none;
+}
+
+.pcs-debug summary:hover {
+  color: #aaa;
+}
+
+.pcs-debug pre {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  color: #aaa;
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Disabled button state */
+.pcs-btn:disabled,
+.pcs-fetch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.pcs-btn:disabled:hover,
+.pcs-fetch-btn:disabled:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
 /* Dark mode support */
 @media (prefers-color-scheme: dark) {
   .pcs-weight-normal {
