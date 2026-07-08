@@ -239,6 +239,133 @@
   border: none;
 }
 
+/* Batch ID Search */
+.pcs-search {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--pcs-border-subtle);
+}
+
+.pcs-search-label {
+  font-size: 9px;
+  color: var(--pcs-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.pcs-search-row {
+  display: flex;
+  gap: 8px;
+}
+
+.pcs-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  background: var(--pcs-bg-card);
+  border: 1px solid var(--pcs-border);
+  border-radius: 8px;
+  color: var(--pcs-text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+
+.pcs-search-input::placeholder {
+  color: var(--pcs-text-muted);
+}
+
+.pcs-search-input:focus {
+  outline: none;
+  border-color: var(--pcs-accent-primary);
+  box-shadow: 0 0 0 3px var(--pcs-glow);
+}
+
+.pcs-search-btn {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 9px 16px;
+}
+
+.pcs-search-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.pcs-search-results {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.pcs-search-results:empty {
+  display: none;
+}
+
+.pcs-search-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--pcs-bg-card);
+  border: 1px solid var(--pcs-border-subtle);
+  border-radius: 8px;
+}
+
+.pcs-search-item-id {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pcs-text-primary);
+  margin-right: auto;
+}
+
+.pcs-search-item-weight {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pcs-accent-primary);
+}
+
+.pcs-search-item-details {
+  flex-basis: 100%;
+  font-size: 10px;
+  color: var(--pcs-text-secondary);
+  cursor: help;
+}
+
+.pcs-search-item-error {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pcs-error);
+  cursor: help;
+}
+
+.pcs-search-results::-webkit-scrollbar {
+  width: 4px;
+}
+
+.pcs-search-results::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pcs-search-results::-webkit-scrollbar-thumb {
+  background: var(--pcs-border);
+  border-radius: 2px;
+}
+
+.pcs-loading {
+  font-size: 11px;
+  color: var(--pcs-text-muted);
+  font-style: italic;
+}
+
 /* Inline Weight Badge in Table */
 .pcs-inline-weight {
   display: inline-flex;
