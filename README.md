@@ -8,6 +8,7 @@ A Firefox browser extension that calculates average item weights for picking bat
 - Fetches FN SKUs for each batch from Rodeo
 - Gets item weights from FC Research
 - Calculates and displays average, min, max, and total weights
+- Search box to look up sizes for one or more specific batch IDs on demand
 - Caches weight data to minimize API calls (30-minute cache)
 - Floating control panel for batch operations
 - Color-coded weight display (light/normal/heavy)
@@ -43,6 +44,20 @@ A Firefox browser extension that calculates average item weights for picking bat
 3. Each batch row now has a weight column with a ⚖️ button
 4. Click the button to fetch the average weight for that specific batch
 5. Or click "Fetch All Weights" to process all visible batches
+
+### Searching Specific Batch IDs
+
+The floating panel includes a **Search Batch IDs** box for looking up sizes
+for batches that may not be visible in the current table view:
+
+1. Type one or more batch IDs into the search box
+2. Separate multiple IDs with a comma, space, or new line
+   (e.g. `12345678, 87654321`)
+3. Press **Search** (or hit Enter)
+4. Each batch's average weight, item count, and total weight appear in the
+   results list below the box. Hover a result for min/max and unique SKU stats.
+
+Results reuse the 30-minute weight cache, so repeated lookups are fast.
 
 ### Weight Display
 

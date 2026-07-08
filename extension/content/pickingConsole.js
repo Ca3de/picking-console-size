@@ -521,6 +521,32 @@
     actions.appendChild(clearBtn);
     content.appendChild(actions);
 
+    // Batch ID search section
+    const search = createElement('div', 'pcs-search');
+    search.appendChild(createElement('div', 'pcs-search-label', 'Search Batch IDs'));
+
+    const searchRow = createElement('div', 'pcs-search-row');
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.id = 'pcs-search-input';
+    searchInput.className = 'pcs-search-input';
+    searchInput.placeholder = 'e.g. 12345678, 87654321';
+    searchInput.title = 'Enter one or more batch IDs separated by comma, space, or new line';
+    searchRow.appendChild(searchInput);
+
+    const searchBtn = createElement('button', 'pcs-btn pcs-btn-primary pcs-search-btn', 'Search');
+    searchBtn.id = 'pcs-search-btn';
+    searchBtn.title = 'Fetch sizes for the entered batch IDs';
+    searchRow.appendChild(searchBtn);
+    search.appendChild(searchRow);
+
+    // Search results container
+    const searchResults = createElement('div', 'pcs-search-results');
+    searchResults.id = 'pcs-search-results';
+    search.appendChild(searchResults);
+
+    content.appendChild(search);
+
     panel.appendChild(content);
     document.body.appendChild(panel);
 
@@ -537,6 +563,19 @@
     panel.querySelector('#pcs-clear-cache').addEventListener('click', () => {
       log('Clear Cache button clicked');
       clearCache();
+    });
+
+    panel.querySelector('#pcs-search-btn').addEventListener('click', () => {
+      log('Search button clicked');
+      searchBatchIds();
+    });
+
+    // Allow pressing Enter in the search input to trigger a search
+    panel.querySelector('#pcs-search-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        searchBatchIds();
+      }
     });
 
     makeDraggable(panel);
@@ -845,6 +884,140 @@
     batchResults.clear();
     updateBatchList(batchDataFromAPI.length > 0 ? batchDataFromAPI.map(b => b.batchId) : scanForBatches());
     updateStatus('Cache cleared');
+  }
+
+  // Parse raw search input into a list of unique batch IDs
+  function parseBatchIdInput(raw) {
+    if (!raw) return { valid: [], invalid: [] };
+    // Split on commas, whitespace, semicolons, and new lines
+    const tokens = raw.split(/[\s,;]+/).map(t => t.trim()).filter(Boolean);
+    const valid = [];
+    const invalid = [];
+    const seen = new Set();
+    for (const token of tokens) {
+      if (/^\d{8,}$/.test(token)) {
+        if (!seen.has(token)) {
+          seen.add(token);
+          valid.push(token);
+        }
+      } else {
+        invalid.push(token);
+      }
+    }
+    return { valid, invalid };
+  }
+
+  // Render the search results list
+  function renderSearchResults(entries) {
+    const container = document.getElementById('pcs-search-results');
+    if (!container) return;
+
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
+
+    entries.forEach(entry => {
+      const item = createElement('div', 'pcs-search-item');
+      item.appendChild(createElement('span', 'pcs-search-item-id', entry.batchId));
+
+      if (entry.status === 'loading') {
+        item.appendChild(createElement('span', 'pcs-loading', 'Loading...'));
+      } else if (entry.status === 'error') {
+        const errorSpan = createElement('span', 'pcs-search-item-error', 'Error');
+        errorSpan.title = entry.error || 'Unknown error';
+        item.appendChild(errorSpan);
+      } else if (entry.status === 'done' && entry.result) {
+        const r = entry.result;
+        item.appendChild(createElement('span', 'pcs-search-item-weight', `${r.averageWeight} lbs avg`));
+        const details = createElement('span', 'pcs-search-item-details', `${r.totalItems} items · ${r.totalWeight} lbs total`);
+        details.title = `Avg: ${r.averageWeight} lbs\nTotal: ${r.totalWeight} lbs\nItems: ${r.totalItems}\nMin: ${r.minWeight} lbs, Max: ${r.maxWeight} lbs\nUnique SKUs: ${r.uniqueSKUs}`;
+        item.appendChild(details);
+      }
+
+      container.appendChild(item);
+    });
+  }
+
+  // Search sizes for one or more manually entered batch IDs
+  let searchInProgress = false;
+  async function searchBatchIds() {
+    const input = document.getElementById('pcs-search-input');
+    if (!input) return;
+
+    if (searchInProgress) {
+      log('Search already in progress, ignoring');
+      return;
+    }
+
+    const { valid: batchIds, invalid } = parseBatchIdInput(input.value);
+
+    if (invalid.length > 0) {
+      log('Ignoring invalid batch ID tokens:', invalid);
+    }
+
+    if (batchIds.length === 0) {
+      updateStatus('Enter one or more valid batch IDs (8+ digits)');
+      renderSearchResults([]);
+      return;
+    }
+
+    searchInProgress = true;
+    const searchBtn = document.getElementById('pcs-search-btn');
+    if (searchBtn) searchBtn.disabled = true;
+
+    // Seed all entries as loading (reuse cached results when available)
+    const entries = batchIds.map(batchId => {
+      const cached = batchResults.get(batchId);
+      if (cached && !cached.error) {
+        return { batchId, status: 'done', result: cached };
+      }
+      return { batchId, status: 'loading' };
+    });
+    renderSearchResults(entries);
+
+    updateStatus(`Searching ${batchIds.length} batch${batchIds.length > 1 ? 'es' : ''}...`);
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (entry.status === 'done') continue; // already served from cache
+
+      updateStatus(`Searching ${i + 1}/${entries.length}: ${entry.batchId}`);
+
+      try {
+        const result = await browser.runtime.sendMessage({
+          type: 'fetchBatchData',
+          batchId: entry.batchId,
+          warehouseId: CONFIG.warehouseId
+        });
+
+        if (result && result.error) {
+          entry.status = 'error';
+          entry.error = result.error;
+        } else {
+          entry.status = 'done';
+          entry.result = result;
+          // Cache for reuse elsewhere in the panel
+          batchResults.set(entry.batchId, result);
+        }
+      } catch (error) {
+        logError('Search fetch error:', error);
+        entry.status = 'error';
+        entry.error = error.message;
+      }
+
+      renderSearchResults(entries);
+    }
+
+    const failures = entries.filter(e => e.status === 'error').length;
+    updateStatus(failures > 0
+      ? `Search complete (${entries.length - failures}/${entries.length} found)`
+      : `Search complete - ${entries.length} batch${entries.length > 1 ? 'es' : ''}`);
+
+    // Refresh table/panel in case searched batches are visible there
+    injectWeightsIntoTable();
+
+    searchInProgress = false;
+    if (searchBtn) searchBtn.disabled = false;
   }
 
   // Update status display
